@@ -1,0 +1,118 @@
+//@version=6
+// HTF Reconstruction Probe v2  -  throwaway diagnostic for HTF-STRADDLE-1 T3
+//
+// Answers three questions before any Suite integration:
+//  Q1  Does request.security_lower_tf return the CURRENT (developing) chart bar's completed
+//      daily sub-bars in realtime?           -> see the DAILIES status row
+//  Q2  Is the constant-gate guard safe on charts at/below Daily?  -> add this to a 1D and a
+//      5m chart: it must load without error and show "recon off (chart <= D)"
+//  Q3  Does daily reconstruction reproduce the REAL forming CC type?  -> compare the REC CC
+//      column on the 1W chart against the CC cell of the Suite's table on the 1D chart
+//
+// Also displays the HARDENED straddle test: the served bar's period must differ from NOW under
+// BOTH readings (raw and +12h). This kills a phantom-straddle window on period-end afternoons
+// (12:00-17:00 ET) where +12h alone reads "next period" before the session actually rolls.
+//
+// HOW TO USE: add to the BTC 1W chart (primary), the BTC 1D chart (control), and optionally a
+// 5m chart (guard check). Screenshot each table.
+
+indicator("HTF Recon Probe v2", overlay = true)
+
+TZ = "America/New_York"
+OFF_MS = 43200000  // +12h
+
+// Comparable period key for a TF class. Bar-side timestamps should be passed +12h-normalized
+// (session-stamped opens land in their true calendar day); "now" is evaluated both ways.
+pkey(int t, string tf) =>
+    m = month(t, TZ)
+    y = year(t, TZ)
+    q = m <= 3 ? 1 : m <= 6 ? 2 : m <= 9 ? 3 : 4
+    tf == "12M" ? y : tf == "3M" ? y * 10 + q : y * 100 + m
+
+// Served HTF bars, fetched exactly as the Suite fetches them. When a slot is straddled, the
+// served bar IS the true prior period, so its high/low double as the C1 range for classification.
+[mT, mH, mL] = request.security(syminfo.tickerid, "M",   [time, high, low], lookahead = barmerge.lookahead_on)
+[qT, qH, qL] = request.security(syminfo.tickerid, "3M",  [time, high, low], lookahead = barmerge.lookahead_on)
+[yT, yH, yL] = request.security(syminfo.tickerid, "12M", [time, high, low], lookahead = barmerge.lookahead_on)
+
+// Q1/Q2: completed daily sub-bars of the current chart bar. Gate is CONSTANT per run, so the
+// request either always executes (chart above D) or never does (chart at/below D) - both legal.
+bool canRecon = timeframe.in_seconds() > timeframe.in_seconds("D")
+array<int> dT = na
+array<float> dO = na
+array<float> dH = na
+array<float> dL = na
+if canRecon
+    [t_, o_, h_, l_] = request.security_lower_tf(syminfo.tickerid, "D", [time, open, high, low])
+    dT := t_
+    dO := o_
+    dH := h_
+    dL := l_
+
+// Reconstruction + classification for one HTF slot (Suite table vocabulary, Reclaim method).
+recon(string tf, int servedT, float c1H, float c1L) =>
+    int pServed = pkey(servedT + OFF_MS, tf)
+    int pNow12 = pkey(timenow + OFF_MS, tf)
+    int pNowRaw = pkey(timenow, tf)
+    bool strad = pServed != pNow12 and pServed != pNowRaw   // hardened: BOTH readings must differ
+    string cc = "-"
+    string info = "feed current"
+    if strad
+        cc := "?"
+        info := "straddled, 0 new-period dailies yet"
+        if canRecon and not na(dT) and array.size(dT) > 0
+            float rO = na
+            float rH = na
+            float rL = na
+            int n = 0
+            for i = 0 to array.size(dT) - 1
+                if pkey(array.get(dT, i) + OFF_MS, tf) == pNowRaw
+                    if n == 0
+                        rO := array.get(dO, i)
+                    rH := na(rH) ? array.get(dH, i) : math.max(rH, array.get(dH, i))
+                    rL := na(rL) ? array.get(dL, i) : math.min(rL, array.get(dL, i))
+                    n += 1
+            if n > 0
+                float rC = close                       // live close is real (same instrument)
+                rH := math.max(rH, rC)
+                rL := math.min(rL, rC)
+                bool up = rH > c1H
+                bool dn = rL < c1L
+                bool insideC1 = rC <= c1H and rC >= c1L
+                cc := up and dn ? (rC > rO ? "3u" : "3d") : up ? (insideC1 ? "f2u" : "2u") : dn ? (insideC1 ? "f2d" : "2d") : (rC > rO ? "1u" : "1d")
+                info := str.tostring(n) + "d O:" + str.tostring(rO, format.mintick) + " H:" + str.tostring(rH, format.mintick) + " L:" + str.tostring(rL, format.mintick) + " C:" + str.tostring(rC, format.mintick)
+    [strad, cc, info]
+
+var table tbl = table.new(position.top_right, 5, 6, bgcolor = color.new(color.black, 0), frame_color = color.gray, frame_width = 1, border_color = #333333, border_width = 1)
+
+if barstate.islast
+    // header
+    table.cell(tbl, 0, 0, "HTF",        text_color = #888888, text_size = size.small)
+    table.cell(tbl, 1, 0, "straddle?",  text_color = #888888, text_size = size.small)
+    table.cell(tbl, 2, 0, "served open (ET)", text_color = #888888, text_size = size.small)
+    table.cell(tbl, 3, 0, "REC CC",     text_color = #888888, text_size = size.small)
+    table.cell(tbl, 4, 0, "detail",     text_color = #888888, text_size = size.small)
+    // dailies status row (Q1 / Q2)
+    string dStat = not canRecon ? "recon off (chart <= D)" : na(dT) or array.size(dT) == 0 ? "canRecon but 0 intrabars" : str.tostring(array.size(dT)) + " dailies: " + str.format_time(array.get(dT, 0), "MM-dd HH:mm", TZ) + " .. " + str.format_time(array.get(dT, array.size(dT) - 1), "MM-dd HH:mm", TZ)
+    table.cell(tbl, 0, 1, "DAILIES", text_color = color.yellow, text_size = size.small)
+    table.cell(tbl, 1, 1, canRecon ? "on" : "off", text_color = color.yellow, text_size = size.small)
+    table.cell(tbl, 2, 1, str.format_time(time, "MM-dd HH:mm", TZ) + " (chart bar)", text_color = color.yellow, text_size = size.small)
+    table.cell(tbl, 3, 1, "", text_color = color.yellow, text_size = size.small)
+    table.cell(tbl, 4, 1, dStat, text_color = color.yellow, text_size = size.small)
+    // per-HTF rows
+    [sM, ccM, infM] = recon("M", mT, mH, mL)
+    [sQ, ccQ, infQ] = recon("3M", qT, qH, qL)
+    [sY, ccY, infY] = recon("12M", yT, yH, yL)
+    labels = array.from("M", "3M", "12M")
+    times = array.from(mT, qT, yT)
+    strads = array.from(sM, sQ, sY)
+    ccs = array.from(ccM, ccQ, ccY)
+    infos = array.from(infM, infQ, infY)
+    for i = 0 to 2
+        r = i + 2
+        c = array.get(strads, i) ? color.orange : color.lime
+        table.cell(tbl, 0, r, array.get(labels, i), text_color = c, text_size = size.small)
+        table.cell(tbl, 1, r, array.get(strads, i) ? "YES" : "no", text_color = c, text_size = size.small)
+        table.cell(tbl, 2, r, str.format_time(array.get(times, i), "yyyy-MM-dd HH:mm", TZ), text_color = c, text_size = size.small)
+        table.cell(tbl, 3, r, array.get(ccs, i), text_color = c, text_size = size.large)
+        table.cell(tbl, 4, r, array.get(infos, i), text_color = c, text_size = size.small)

@@ -1,0 +1,66 @@
+//@version=6
+// HTF Timestamp Probe  -  throwaway diagnostic for HTF-STRADDLE-1
+//
+// Purpose: reveal how TradingView timestamps a higher-timeframe (calendar) bar's OPEN,
+// exactly as the main indicator fetches it (request.security + lookahead_on), so the
+// straddle detection can be rebuilt on fact instead of inference.
+//
+// HOW TO USE (near a month/quarter roll, e.g. early July 2026 on Micro Gold):
+//   1. Add this to a chart. Read the table (top-right).
+//   2. Do it on a 1W chart AND on a 1M chart AND a 1D chart. Screenshot each.
+//
+// WHAT WE'RE LOOKING FOR, per HTF row:
+//   - "served open (ET)"  = the current HTF bar's open time as the indicator sees it.
+//        Is the CURRENT quarter's bar stamped Jul 01 00:00 (calendar-start) or
+//        Jun 30 18:00 (prior-evening session open)? That is the whole question.
+//   - "srv M/Q" vs "now M/Q": if these DIFFER on a chart where the HTF is NOT actually
+//        straddled (e.g. 3M row on the 1M chart), the realPeriodTime-based test would
+//        ALSO misfire and needs a session-offset correction. If they MATCH there and
+//        only differ on a genuine straddle (3M row on the 1W chart), the clean
+//        realPeriodTime compare is correct as-is.
+//   - "chart M/Q" is what the BROKEN v2.2.2 code used (the chart bar's own period) -
+//        shown so the discrepancy that caused the regression is visible directly.
+
+indicator("HTF Timestamp Probe", overlay = true)
+
+TZ = "America/New_York"
+
+f_q(t) => na(t) ? na : math.ceil(month(t, TZ) / 3)
+f_mq(t) => na(t) ? "na" : str.tostring(month(t, TZ)) + "/Q" + str.tostring(math.ceil(month(t, TZ) / 3))
+f_fmt(t) => na(t) ? "na" : str.format_time(t, "yyyy-MM-dd HH:mm", TZ)
+
+// Served HTF bar OPEN times, fetched exactly like the main indicator (lookahead_on).
+wOpen = request.security(syminfo.tickerid, "W",   time, lookahead = barmerge.lookahead_on)
+mOpen = request.security(syminfo.tickerid, "M",   time, lookahead = barmerge.lookahead_on)
+qOpen = request.security(syminfo.tickerid, "3M",  time, lookahead = barmerge.lookahead_on)
+yOpen = request.security(syminfo.tickerid, "12M", time, lookahead = barmerge.lookahead_on)
+
+var table tbl = table.new(position.top_right, 5, 6, bgcolor = color.new(color.black, 0), frame_color = color.gray, frame_width = 1, border_color = #333333, border_width = 1)
+
+if barstate.islast
+    nowMQ = f_mq(timenow)
+    // header
+    table.cell(tbl, 0, 0, "HTF",             text_color = #888888, text_size = size.small)
+    table.cell(tbl, 1, 0, "served open (ET)", text_color = #888888, text_size = size.small)
+    table.cell(tbl, 2, 0, "srv M/Q",         text_color = #888888, text_size = size.small)
+    table.cell(tbl, 3, 0, "now M/Q",         text_color = #888888, text_size = size.small)
+    table.cell(tbl, 4, 0, "chart M/Q",       text_color = #888888, text_size = size.small)
+    // context row: the chart itself
+    table.cell(tbl, 0, 1, "CHART " + timeframe.period, text_color = color.yellow, text_size = size.small)
+    table.cell(tbl, 1, 1, f_fmt(time),  text_color = color.yellow, text_size = size.small)
+    table.cell(tbl, 2, 1, f_mq(time),   text_color = color.yellow, text_size = size.small)
+    table.cell(tbl, 3, 1, nowMQ,        text_color = color.yellow, text_size = size.small)
+    table.cell(tbl, 4, 1, f_mq(time),   text_color = color.yellow, text_size = size.small)
+    // per-HTF rows (red = served period differs from now = would trigger straddle test)
+    labels = array.from("W", "M", "3M", "12M")
+    opens  = array.from(wOpen, mOpen, qOpen, yOpen)
+    for i = 0 to 3
+        o = array.get(opens, i)
+        bool diff = na(o) or f_mq(o) != nowMQ
+        c = diff ? color.red : color.lime
+        r = i + 2
+        table.cell(tbl, 0, r, array.get(labels, i), text_color = c, text_size = size.small)
+        table.cell(tbl, 1, r, f_fmt(o),             text_color = c, text_size = size.small)
+        table.cell(tbl, 2, r, f_mq(o),              text_color = c, text_size = size.small)
+        table.cell(tbl, 3, r, nowMQ,                text_color = c, text_size = size.small)
+        table.cell(tbl, 4, r, f_mq(time),           text_color = #777777, text_size = size.small)
