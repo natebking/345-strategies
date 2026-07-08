@@ -9,7 +9,11 @@ TheStrat price-action indicator for TradingView (Pine Script v6), sold at thestr
 ## Contents
 
 ### `pine/` - indicator source (newest first)
-- **`TheStratSuite_v2.2.4-split.pine`** - current working build. HTF-straddle fix line
+- **`TheStratSuite_v2.2.6-split.pine`** - current working build. Adds RECON-KEY-1 (normalize the
+  reconstruction `pNow` key by +12h to match the daily-bar keys, fixing a wrong forming CC in the
+  ~7h roll window that GLUE-2b exposed) and TFCOLOR-1 ("Color TF When In-Force" no longer highlights
+  inside bars, which are not in force). Bug-verified via a GPT-5.5 read-only review of v2.2.4.
+- `TheStratSuite_v2.2.4-split.pine` - GLUE milestone (superseded). HTF-straddle fix line
   (session-aware detection + daily-bar reconstruction of the forming HTF candle) plus
   GLUE-1 / GLUE-2b (CME holiday-glued-bar handling for Auto-preview and the straddle test).
 - `TheStratSuite_v2.2.2-split.pine` - prior build (HTF-straddle T1 period shift + T3 daily reconstruction).
