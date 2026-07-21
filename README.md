@@ -33,6 +33,8 @@ TheStrat price-action indicator for TradingView (Pine Script v6), sold at thestr
   normalization, daily reconstruction, preview mode.
 - `concepts/bar-types.md` - trader-facing: bar structures, notation rules (incl. NOTATION-1
   F2 casing), Failing 2s, hammers/shooters, combo strings, the canonical classification tuple.
+- `concepts/signals.md` - trader-facing: the seven signal types, defaults, filters, potential
+  vs in-force mechanics, Universal label names.
 
 ### `diagnostics/`
 - `HTF_Timestamp_Probe.pine`, `HTF_Recon_Probe_v2.pine` - throwaway diagnostics from the
