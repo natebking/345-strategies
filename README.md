@@ -21,8 +21,11 @@ TheStrat price-action indicator for TradingView (Pine Script v6), sold at thestr
 - `TheStratSuite_v180_June16_2026.pine` - June 16 2026 baseline (pre-audit original).
 
 ### `docs/`
+- `README.md` - documentation index and roadmap (open-source release prep).
 - `TheStratSuite_v2.2.1_Settings_Reference.md` - full settings / options reference.
 - `DESIGN_CONSTRAINTS.md` - design constraints and invariants.
+- `v2.2.3_holiday_glue_fix.md` - holiday-glue postmortem (GLUE-1 / GLUE-2b root cause and fix).
+- `engineering/repaint-prevention.md` - the no-repaint contract: 7 rules + contributor checklist.
 
 ### `diagnostics/`
 - `HTF_Timestamp_Probe.pine`, `HTF_Recon_Probe_v2.pine` - throwaway diagnostics from the
