@@ -1,47 +1,52 @@
-# TheStrat Suite - private archive
+# TheStrat Suite
 
-Confidential, proprietary source for **TheStrat Suite** - a commercial multi-timeframe
-TheStrat price-action indicator for TradingView (Pine Script v6), sold at thestratsuite.com.
+Multi-timeframe price action indicator for TradingView (Pine Script v6), implementing Rob Smith's TheStrat methodology. Six configurable timeframes on one chart: bar classification, signal detection with magnitude and exhaustion targets, Full Timeframe Continuity, stop levels, Domino detection, consolidated alerts, and a live multi-timeframe data table.
 
-> **This repository is PRIVATE and for archival / posterity only. Confidential proprietary
-> code - do not share, publish, or redistribute.**
+Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
+
+## Quick start
+
+1. Copy `pine/TheStratSuite_v2.2.7-split.pine` into the TradingView Pine editor and add it to a chart.
+2. Pick a Timeframe Preset (TheStrat Classic, Scalp, Day Trade, Futures/Crypto, Swing Trade, Investing) — or set Custom and configure the six slots yourself.
+3. Read `docs/concepts/bar-types.md` and `docs/concepts/signals.md` to learn what you're looking at.
 
 ## Contents
 
-### `pine/` - indicator source (newest first)
-- **`TheStratSuite_v2.2.7-split.pine`** - current working build. NOTATION-1: canonical uppercase
-  F2u/F2d everywhere (lowercase live-'f' retired; liveness = slot position / '*' prefix / words).
-  Display-string change only, no logic. Matches priceactionapi notation.
-- `TheStratSuite_v2.2.6-split.pine` - adds RECON-KEY-1 (normalize the
-  reconstruction `pNow` key by +12h to match the daily-bar keys, fixing a wrong forming CC in the
-  ~7h roll window that GLUE-2b exposed) and TFCOLOR-1 ("Color TF When In-Force" no longer highlights
-  inside bars, which are not in force). Bug-verified via a GPT-5.5 read-only review of v2.2.4.
-- `TheStratSuite_v2.2.4-split.pine` - GLUE milestone (superseded). HTF-straddle fix line
-  (session-aware detection + daily-bar reconstruction of the forming HTF candle) plus
-  GLUE-1 / GLUE-2b (CME holiday-glued-bar handling for Auto-preview and the straddle test).
-- `TheStratSuite_v2.2.2-split.pine` - prior build (HTF-straddle T1 period shift + T3 daily reconstruction).
-- `TheStratSuite_v2.2.0.pine` - pre-split public release baseline.
-- `TheStratSuite_v180_June16_2026.pine` - June 16 2026 baseline (pre-audit original).
+### `pine/` — indicator source (newest first)
+
+- **`TheStratSuite_v2.2.7-split.pine`** — current build. NOTATION-1: canonical uppercase F2u/F2d
+  (lowercase live-'f' retired; liveness = slot position / '*' prefix / words).
+- `TheStratSuite_v2.2.6-split.pine` — RECON-KEY-1 (+12h key normalization for daily
+  reconstruction) and TFCOLOR-1 (in-force column no longer highlights inside bars).
+- `TheStratSuite_v2.2.4-split.pine` — GLUE milestone: HTF-straddle fix line plus GLUE-1 / GLUE-2b
+  (CME holiday-glued-bar handling).
+- `TheStratSuite_v2.2.2-split.pine` — HTF-straddle T1 period shift + T3 daily reconstruction.
+- `TheStratSuite_v2.2.0.pine` — pre-split baseline.
+- `TheStratSuite_v180_June16_2026.pine` — June 2026 pre-audit original.
 
 ### `docs/`
-- `README.md` - documentation index and roadmap (open-source release prep).
-- `TheStratSuite_v2.2.1_Settings_Reference.md` - full settings / options reference.
-- `DESIGN_CONSTRAINTS.md` - design constraints and invariants.
-- `v2.2.3_holiday_glue_fix.md` - holiday-glue postmortem (GLUE-1 / GLUE-2b root cause and fix).
-- `engineering/repaint-prevention.md` - the no-repaint contract: 7 rules + contributor checklist.
-- `engineering/htf-correctness.md` - multi-timeframe correctness: straddle/glue handling, +12h
+
+Start at `docs/README.md` (the index). Trader-facing docs live in `docs/concepts/`, engineering docs in `docs/engineering/`. Highlights:
+
+- `concepts/bar-types.md` — bar structures, notation rules, Failing 2s, hammers/shooters.
+- `concepts/signals.md` — the seven signal types, defaults, filters, in-force mechanics.
+- `engineering/repaint-prevention.md` — the no-repaint contract: 7 rules + contributor checklist.
+- `engineering/htf-correctness.md` — multi-timeframe correctness: straddle/glue handling, +12h
   normalization, daily reconstruction, preview mode.
-- `concepts/bar-types.md` - trader-facing: bar structures, notation rules (incl. NOTATION-1
-  F2 casing), Failing 2s, hammers/shooters, combo strings, the canonical classification tuple.
-- `concepts/signals.md` - trader-facing: the seven signal types, defaults, filters, potential
-  vs in-force mechanics, Universal label names.
+- `TheStratSuite_v2.2.1_Settings_Reference.md` — full settings reference (v2.2.1; refresh pending).
+- `DESIGN_CONSTRAINTS.md` — intentional design decisions reviewers should not flag as bugs.
+- `v2.2.3_holiday_glue_fix.md` — postmortem of the CME holiday-glue incident.
 
 ### `diagnostics/`
-- `HTF_Timestamp_Probe.pine`, `HTF_Recon_Probe_v2.pine` - throwaway diagnostics from the
-  HTF-straddle investigation. Not part of the shipped product; retained for development history.
 
-## Notes
-- Pine Script v6. No-repaint is a hard, zero-tolerance requirement throughout.
-- Fix history is documented inline via `// FIX <id>` comments (P0/P1/P2, BTC, CSS, TAW, MOD,
-  HTF-STRADDLE, GLUE).
-- Archived 2026-07-07.
+Throwaway probe scripts from the HTF-straddle investigation. Not part of the shipped indicator; retained because they document how the straddle behavior was measured.
+
+## Engineering ground rules
+
+- **No-repaint is a hard, zero-tolerance requirement.** What you saw live is what a reload shows. The rules are documented, with case studies, in `docs/engineering/repaint-prevention.md`.
+- Fix history is inline via `// FIX <id>` comments (P0/P1/P2, BTC, CSS, TAW, MOD, HTF-STRADDLE, GLUE, RECON-KEY, TFCOLOR, NOTATION). Every tag marks a solved bug and the rule that came out of it — grep for them.
+- Contributions should pass the contributor checklists at the end of the two engineering docs before review.
+
+## License
+
+Mozilla Public License 2.0 — see `LICENSE`. Source files carry the standard MPL header.

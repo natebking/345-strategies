@@ -1,6 +1,10 @@
 //@version=6
 // TheStrat Suite - v2.2.7-split
 //
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+//
 // NOTATION-1 (2026-07-21): canonical uppercase F2u/F2d everywhere. The lowercase live-'f'
 // (f2u/f2d for the forming candle) is retired: notation is tense-free; liveness is carried
 // by slot position (last token = forming candle), the '*' potential prefix, and words
