@@ -1,7 +1,7 @@
 # TheStrat Suite v2.2.0 - Review Brief: Conscious Design Decisions
 
-Source under review: `/Users/nathanking/Documents/TheStrat/current/code/suite_review_20260612/TheStratSuite_v2.2.0.pine`
-(Pine Script v6 TradingView indicator, ~2,800 lines. Sold commercially; correctness and performance both matter.)
+Source under review: `pine/TheStratSuite_v2.2.0.pine` (in this repo)
+(Pine Script v6 TradingView indicator, ~2,800 lines. Correctness and performance both matter.)
 
 These decisions are INTENTIONAL. Do NOT report them as bugs. You may report
 implementation flaws WITHIN them, or cases where the implementation contradicts

@@ -15,6 +15,8 @@ Engineering docs reference the code by function name and `FIX` tag (grep-able), 
 | `engineering/htf-correctness.md` | Builder | Reading 6 TFs from one chart: validTimeframe gate, straddle/glue handling, +12h rule, daily reconstruction, preview mode |
 | `concepts/bar-types.md` | Trader | The three structures, the u/d overload, Failing 2s + NOTATION-1 casing rule, HAM/SHO, combo strings, the canonical tuple |
 | `concepts/signals.md` | Trader | The seven signal types with defaults and filters, potential vs in-force mechanics, detection-vs-signal F2 nuance, Universal names |
+| Root `README.md` + `LICENSE` (MPL-2.0) | Both | Public-facing; confidential framing removed 2026-07-21 |
+| `RELEASE_CHECKLIST.md` | — | Pre-flight for the visibility flip: what's done, what's Nate's call |
 | `v2.2.3_holiday_glue_fix.md` | Builder | Postmortem: CME holiday-glued bars (GLUE-1 / GLUE-2b) |
 | `DESIGN_CONSTRAINTS.md` | Builder | Intentional design decisions — what reviewers must not flag as bugs |
 | `TheStratSuite_v2.2.1_Settings_Reference.md` | Trader | Full settings reference (written for v2.2.1; needs a v2.2.6 refresh pass) |
@@ -23,7 +25,6 @@ Engineering docs reference the code by function name and `FIX` tag (grep-able), 
 
 | Doc | Audience | Priority |
 |---|---|---|
-| Root repo `README.md` rewrite for public audience + `LICENSE` (recommend MPL-2.0, Nate to confirm) | Both | Launch — next up |
 | `engineering/architecture.md` — the pipeline: security → preview shift → compute → filter → render | Builder | Fast-follow |
 | `engineering/drawing-decisions.md` — shouldDrawC1Level tree, suppression rules | Builder | Fast-follow |
 | `engineering/rendering.md` — x/y anchoring, update-in-place, label pool, consolidation | Builder | Fast-follow |
