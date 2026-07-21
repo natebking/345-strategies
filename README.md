@@ -26,6 +26,8 @@ TheStrat price-action indicator for TradingView (Pine Script v6), sold at thestr
 - `DESIGN_CONSTRAINTS.md` - design constraints and invariants.
 - `v2.2.3_holiday_glue_fix.md` - holiday-glue postmortem (GLUE-1 / GLUE-2b root cause and fix).
 - `engineering/repaint-prevention.md` - the no-repaint contract: 7 rules + contributor checklist.
+- `engineering/htf-correctness.md` - multi-timeframe correctness: straddle/glue handling, +12h
+  normalization, daily reconstruction, preview mode.
 
 ### `diagnostics/`
 - `HTF_Timestamp_Probe.pine`, `HTF_Recon_Probe_v2.pine` - throwaway diagnostics from the
