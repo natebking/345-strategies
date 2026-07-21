@@ -13,6 +13,7 @@ Engineering docs reference the code by function name and `FIX` tag (grep-able), 
 |---|---|---|
 | `engineering/repaint-prevention.md` | Builder | The no-repaint contract: 7 rules + contributor checklist |
 | `engineering/htf-correctness.md` | Builder | Reading 6 TFs from one chart: validTimeframe gate, straddle/glue handling, +12h rule, daily reconstruction, preview mode |
+| `concepts/bar-types.md` | Trader | The three structures, the u/d overload, Failing 2s + NOTATION-1 casing rule, HAM/SHO, combo strings, the canonical tuple |
 | `v2.2.3_holiday_glue_fix.md` | Builder | Postmortem: CME holiday-glued bars (GLUE-1 / GLUE-2b) |
 | `DESIGN_CONSTRAINTS.md` | Builder | Intentional design decisions — what reviewers must not flag as bugs |
 | `TheStratSuite_v2.2.1_Settings_Reference.md` | Trader | Full settings reference (written for v2.2.1; needs a v2.2.6 refresh pass) |
@@ -21,8 +22,7 @@ Engineering docs reference the code by function name and `FIX` tag (grep-able), 
 
 | Doc | Audience | Priority |
 |---|---|---|
-| `concepts/bar-types.md` — 1/2u/2d/3, Failed 2s, gap handling, hammer/shooter definitions | Trader | Launch — next up |
-| `concepts/signals.md` — taxonomy: inside rev/cont, 2-2, 3-2 expansions, outside bars, reclaims | Trader | Launch |
+| `concepts/signals.md` — taxonomy: inside rev/cont, 2-2, 3-2 expansions, outside bars, reclaims | Trader | Launch — next up |
 | Root repo `README.md` rewrite for public audience + `LICENSE` (recommend MPL-2.0, Nate to confirm) | Both | Launch |
 | `engineering/architecture.md` — the pipeline: security → preview shift → compute → filter → render | Builder | Fast-follow |
 | `engineering/drawing-decisions.md` — shouldDrawC1Level tree, suppression rules | Builder | Fast-follow |

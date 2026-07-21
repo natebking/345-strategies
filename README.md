@@ -9,7 +9,10 @@ TheStrat price-action indicator for TradingView (Pine Script v6), sold at thestr
 ## Contents
 
 ### `pine/` - indicator source (newest first)
-- **`TheStratSuite_v2.2.6-split.pine`** - current working build. Adds RECON-KEY-1 (normalize the
+- **`TheStratSuite_v2.2.7-split.pine`** - current working build. NOTATION-1: canonical uppercase
+  F2u/F2d everywhere (lowercase live-'f' retired; liveness = slot position / '*' prefix / words).
+  Display-string change only, no logic. Matches priceactionapi notation.
+- `TheStratSuite_v2.2.6-split.pine` - adds RECON-KEY-1 (normalize the
   reconstruction `pNow` key by +12h to match the daily-bar keys, fixing a wrong forming CC in the
   ~7h roll window that GLUE-2b exposed) and TFCOLOR-1 ("Color TF When In-Force" no longer highlights
   inside bars, which are not in force). Bug-verified via a GPT-5.5 read-only review of v2.2.4.
@@ -28,6 +31,8 @@ TheStrat price-action indicator for TradingView (Pine Script v6), sold at thestr
 - `engineering/repaint-prevention.md` - the no-repaint contract: 7 rules + contributor checklist.
 - `engineering/htf-correctness.md` - multi-timeframe correctness: straddle/glue handling, +12h
   normalization, daily reconstruction, preview mode.
+- `concepts/bar-types.md` - trader-facing: bar structures, notation rules (incl. NOTATION-1
+  F2 casing), Failing 2s, hammers/shooters, combo strings, the canonical classification tuple.
 
 ### `diagnostics/`
 - `HTF_Timestamp_Probe.pine`, `HTF_Recon_Probe_v2.pine` - throwaway diagnostics from the
