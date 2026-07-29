@@ -1,0 +1,976 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// at https://mozilla.org/MPL/2.0/
+// © 2026 TheStratSuite contributors
+//@version=6
+
+// RESEARCH ONLY.
+//
+// Purpose
+// -------
+// Use the production RSD v1.7 Macro swing/broadening-wall logic to choose and
+// expose the time population for a native Fixed Range Volume Profile.
+//
+// This is UI wiring, not a profile-quality evaluator. Routine mode's useful
+// output is the RSD-selected range box. Apply TradingView's native FRVP to the
+// same timestamps when judging shelves, nodes, POC, or Value Area.
+//
+// Important approximation
+// -----------------------
+// A wall's final endpoint is known only after the Macro pivot confirms. Pine
+// cannot then reconstruct and retain every native footprint row that preceded
+// that confirmation without a much larger event store. This preview can rebuild
+// an illustrative historical shape from stored one-minute OHLCV and spreads each
+// minute's volume evenly through the output rows touched by that minute. Such
+// allocation can manufacture or erase apparent shelves. Every derived profile
+// visual is therefore explicitly labelled APPROX / NON-EVALUABLE and is not
+// footprint/TradingView FRVP parity.
+//
+// The RSD anchor path below matches v1.7 when "Use HTF confluence" is OFF:
+//   * locked Macro timeframe;
+//   * asymmetric pivot confirmation;
+//   * optional Multi-N union;
+//   * newest/prior/far reduction by pivot time;
+//   * pullback-tolerant two-sided wall gate;
+//   * far-vs-prior containment rule; and
+//   * optional steep-wall suppression.
+//
+// Production RSD and the v0.2 footprint parity shell are intentionally separate.
+indicator(
+     "VP + RSD Macro Wall Preview v0.1.0 (Approx)",
+     shorttitle = "VP RSD Wall EXP",
+     overlay = true,
+     max_bars_back = 5000,
+     max_lines_count = 500,
+     max_boxes_count = 20,
+     max_labels_count = 20)
+
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+string anchorGroup = "1. RSD Macro anchors"
+string macroTF = input.string(
+     "240",
+     "Macro timeframe",
+     options = ["60", "240"],
+     group = anchorGroup,
+     tooltip = "Must match RSD's locked Macro timeframe.")
+bool useMultiN = input.bool(
+     false,
+     "Multi-N pass",
+     group = anchorGroup,
+     tooltip = "Must match RSD. OFF uses only N medium.")
+int nFast = input.int(
+     3,
+     "N fast (left bars)",
+     minval = 2,
+     maxval = 10,
+     group = anchorGroup)
+int nMed = input.int(
+     5,
+     "N medium (left bars)",
+     minval = 2,
+     maxval = 20,
+     group = anchorGroup)
+int rightBars = input.int(
+     2,
+     "Right bars (confirmation)",
+     minval = 1,
+     maxval = 10,
+     group = anchorGroup)
+bool wallRequireBothSides = input.bool(
+     true,
+     "Require two-sided broadening",
+     group = anchorGroup,
+     tooltip = "Match the corresponding RSD setting.")
+bool hideSteepWalls = input.bool(
+     true,
+     "Hide steep walls",
+     group = anchorGroup)
+float maxWallSlope = input.float(
+     0.05,
+     "Max wall slope (ATR/bar)",
+     minval = 0.0,
+     step = 0.01,
+     group = anchorGroup,
+     tooltip = "Match the corresponding RSD setting.")
+
+string profileGroup = "2. Approximate profile"
+int targetRows = input.int(
+     72,
+     "Target rows",
+     minval = 24,
+     maxval = 120,
+     group = profileGroup)
+float valueAreaPercent = input.float(
+     70.0,
+     "Value Area percent",
+     minval = 50.0,
+     maxval = 95.0,
+     step = 1.0,
+     group = profileGroup)
+int cliffWindow = input.int(
+     2,
+     "Shelf comparison rows per side",
+     minval = 1,
+     maxval = 4,
+     group = profileGroup)
+float cliffRatioThreshold = input.float(
+     1.80,
+     "Minimum volume-cliff ratio",
+     minval = 1.05,
+     maxval = 10.0,
+     step = 0.05,
+     group = profileGroup)
+float minimumProfileCV = input.float(
+     0.25,
+     "Minimum profile unevenness (CV)",
+     minval = 0.0,
+     maxval = 2.0,
+     step = 0.05,
+     group = profileGroup,
+     tooltip = "Flat profiles abstain and show no shelf.")
+
+string displayGroup = "3. Display"
+string displayMode = input.string(
+     "Routine",
+     "Mode",
+     options = ["Routine", "Research"],
+     group = displayGroup,
+     tooltip = "Routine: the RSD-selected range outline only. Research adds a non-evaluable approximate histogram, POC, Value Area, and optional illustrative transition.")
+bool showShelf = input.bool(
+     false,
+     "Research: show one illustrative transition",
+     group = displayGroup,
+     tooltip = "Non-evaluable UI experiment derived from approximate OHLCV allocation. Never use it to judge shelf quality; compare the native FRVP instead.")
+color rangeColor = input.color(
+     #26c6da,
+     "Range outline",
+     group = displayGroup)
+color shelfColor = input.color(
+     #d7ccc8,
+     "Illustrative transition",
+     group = displayGroup)
+
+
+// ============================================================================
+// CONSTANTS AND SMALL HELPERS
+// ============================================================================
+
+const string SOURCE_TIMEFRAME = "1"
+const int MINUTE_MS = 60000
+const int MAX_STORED_MINUTES = 30000
+const int MAX_PROFILE_BINS = 256
+
+priceToTicks(float price) =>
+    na(price) ? na : int(math.round(price / syminfo.mintick))
+
+binVolume(map<int, float> bins, int bin) =>
+    bins.contains(bin) ? bins.get(bin) : 0.0
+
+clearLines(array<line> drawings) =>
+    int count = drawings.size()
+    if count > 0
+        for index = 0 to count - 1
+            line.delete(drawings.get(index))
+    drawings.clear()
+
+// Most recent chart bar at or before an HTF candle's opening timestamp.
+// This is copied semantically from RSD v1.7 and is used only on the last bar.
+htfTimeToBar(int pivotTime) =>
+    int maxOffset = math.min(bar_index, 4999)
+    int result = bar_index
+    if not na(pivotTime) and pivotTime > 0
+        result := bar_index - maxOffset
+        for offset = 0 to maxOffset
+            if time[offset] <= pivotTime
+                result := bar_index - offset
+                break
+    result
+
+
+// ============================================================================
+// RSD v1.7 MACRO SWING PATH (HTF CONFLUENCE OFF)
+// ============================================================================
+
+findMacroPivots() =>
+    bool highMedCondition = not na(ta.pivothigh(high, nMed, rightBars))
+    bool lowMedCondition = not na(ta.pivotlow(low, nMed, rightBars))
+
+    float high0Med = ta.valuewhen(highMedCondition, high[rightBars], 0)[1]
+    int highTime0Med = ta.valuewhen(highMedCondition, time[rightBars], 0)[1]
+    float high1Med = ta.valuewhen(highMedCondition, high[rightBars], 1)[1]
+    int highTime1Med = ta.valuewhen(highMedCondition, time[rightBars], 1)[1]
+    float high2Med = ta.valuewhen(highMedCondition, high[rightBars], 2)[1]
+    int highTime2Med = ta.valuewhen(highMedCondition, time[rightBars], 2)[1]
+
+    float low0Med = ta.valuewhen(lowMedCondition, low[rightBars], 0)[1]
+    int lowTime0Med = ta.valuewhen(lowMedCondition, time[rightBars], 0)[1]
+    float low1Med = ta.valuewhen(lowMedCondition, low[rightBars], 1)[1]
+    int lowTime1Med = ta.valuewhen(lowMedCondition, time[rightBars], 1)[1]
+    float low2Med = ta.valuewhen(lowMedCondition, low[rightBars], 2)[1]
+    int lowTime2Med = ta.valuewhen(lowMedCondition, time[rightBars], 2)[1]
+
+    bool highFastCondition = not na(ta.pivothigh(high, nFast, rightBars))
+    bool lowFastCondition = not na(ta.pivotlow(low, nFast, rightBars))
+
+    float high0Fast = useMultiN ? ta.valuewhen(highFastCondition, high[rightBars], 0)[1] : na
+    int highTime0Fast = useMultiN ? ta.valuewhen(highFastCondition, time[rightBars], 0)[1] : na
+    float high1Fast = useMultiN ? ta.valuewhen(highFastCondition, high[rightBars], 1)[1] : na
+    int highTime1Fast = useMultiN ? ta.valuewhen(highFastCondition, time[rightBars], 1)[1] : na
+    float high2Fast = useMultiN ? ta.valuewhen(highFastCondition, high[rightBars], 2)[1] : na
+    int highTime2Fast = useMultiN ? ta.valuewhen(highFastCondition, time[rightBars], 2)[1] : na
+
+    float low0Fast = useMultiN ? ta.valuewhen(lowFastCondition, low[rightBars], 0)[1] : na
+    int lowTime0Fast = useMultiN ? ta.valuewhen(lowFastCondition, time[rightBars], 0)[1] : na
+    float low1Fast = useMultiN ? ta.valuewhen(lowFastCondition, low[rightBars], 1)[1] : na
+    int lowTime1Fast = useMultiN ? ta.valuewhen(lowFastCondition, time[rightBars], 1)[1] : na
+    float low2Fast = useMultiN ? ta.valuewhen(lowFastCondition, low[rightBars], 2)[1] : na
+    int lowTime2Fast = useMultiN ? ta.valuewhen(lowFastCondition, time[rightBars], 2)[1] : na
+
+    [high0Med, highTime0Med, high1Med, highTime1Med, high2Med, highTime2Med,
+     low0Med, lowTime0Med, low1Med, lowTime1Med, low2Med, lowTime2Med,
+     high0Fast, highTime0Fast, high1Fast, highTime1Fast, high2Fast, highTime2Fast,
+     low0Fast, lowTime0Fast, low1Fast, lowTime1Fast, low2Fast, lowTime2Fast]
+
+reduceTopThreeByTime(
+     float price0,
+     int time0,
+     float price1,
+     int time1,
+     float price2,
+     int time2,
+     float price3,
+     int time3,
+     float price4,
+     int time4,
+     float price5,
+     int time5) =>
+    array<float> prices = array.from(price0, price1, price2, price3, price4, price5)
+    array<int> times = array.from(time0, time1, time2, time3, time4, time5)
+    array<float> validPrices = array.new_float()
+    array<int> validTimes = array.new_int()
+
+    for index = 0 to 5
+        float candidatePrice = prices.get(index)
+        int candidateTime = times.get(index)
+        if not na(candidatePrice) and not na(candidateTime) and candidateTime > 0
+            bool duplicate = false
+            int validCount = validTimes.size()
+            if validCount > 0
+                for validIndex = 0 to validCount - 1
+                    if math.abs(candidateTime - validTimes.get(validIndex)) < MINUTE_MS and
+                     math.abs(candidatePrice - validPrices.get(validIndex)) < syminfo.mintick
+                        duplicate := true
+                        break
+            if not duplicate
+                validPrices.push(candidatePrice)
+                validTimes.push(candidateTime)
+
+    int sortCount = validTimes.size()
+    if sortCount > 1
+        for index = 1 to sortCount - 1
+            int candidateTime = validTimes.get(index)
+            float candidatePrice = validPrices.get(index)
+            int insertionIndex = index - 1
+            while insertionIndex >= 0 and validTimes.get(insertionIndex) < candidateTime
+                validTimes.set(insertionIndex + 1, validTimes.get(insertionIndex))
+                validPrices.set(insertionIndex + 1, validPrices.get(insertionIndex))
+                insertionIndex -= 1
+            validTimes.set(insertionIndex + 1, candidateTime)
+            validPrices.set(insertionIndex + 1, candidatePrice)
+
+    float newestPrice = na
+    int newestTime = na
+    float priorPrice = na
+    int priorTime = na
+    float farPrice = na
+    int farTime = na
+    int resultCount = validTimes.size()
+    if resultCount >= 1
+        newestPrice := validPrices.get(0)
+        newestTime := validTimes.get(0)
+    if resultCount >= 2
+        priorPrice := validPrices.get(1)
+        priorTime := validTimes.get(1)
+    if resultCount >= 3
+        farPrice := validPrices.get(2)
+        farTime := validTimes.get(2)
+    [newestPrice, newestTime, priorPrice, priorTime, farPrice, farTime]
+
+[macroHigh0Med, macroHighTime0Med,
+ macroHigh1Med, macroHighTime1Med,
+ macroHigh2Med, macroHighTime2Med,
+ macroLow0Med, macroLowTime0Med,
+ macroLow1Med, macroLowTime1Med,
+ macroLow2Med, macroLowTime2Med,
+ macroHigh0Fast, macroHighTime0Fast,
+ macroHigh1Fast, macroHighTime1Fast,
+ macroHigh2Fast, macroHighTime2Fast,
+ macroLow0Fast, macroLowTime0Fast,
+ macroLow1Fast, macroLowTime1Fast,
+ macroLow2Fast, macroLowTime2Fast] = request.security(
+     syminfo.tickerid,
+     macroTF,
+     findMacroPivots(),
+     lookahead = barmerge.lookahead_on)
+
+[macroOuterHigh, macroOuterHighTime,
+ macroPriorHigh, macroPriorHighTime,
+ macroFarHigh, macroFarHighTime] = reduceTopThreeByTime(
+     macroHigh0Med, macroHighTime0Med,
+     macroHigh1Med, macroHighTime1Med,
+     macroHigh2Med, macroHighTime2Med,
+     macroHigh0Fast, macroHighTime0Fast,
+     macroHigh1Fast, macroHighTime1Fast,
+     macroHigh2Fast, macroHighTime2Fast)
+
+[macroOuterLow, macroOuterLowTime,
+ macroPriorLow, macroPriorLowTime,
+ macroFarLow, macroFarLowTime] = reduceTopThreeByTime(
+     macroLow0Med, macroLowTime0Med,
+     macroLow1Med, macroLowTime1Med,
+     macroLow2Med, macroLowTime2Med,
+     macroLow0Fast, macroLowTime0Fast,
+     macroLow1Fast, macroLowTime1Fast,
+     macroLow2Fast, macroLowTime2Fast)
+
+
+// ============================================================================
+// ONE-MINUTE OHLCV RING BUFFER
+// ============================================================================
+
+oneMinutePayload() =>
+    [time, priceToTicks(high), priceToTicks(low), volume]
+
+[requestedTimes,
+ requestedHighTicks,
+ requestedLowTicks,
+ requestedVolumes] = request.security_lower_tf(
+     syminfo.tickerid,
+     SOURCE_TIMEFRAME,
+     oneMinutePayload(),
+     ignore_invalid_timeframe = true)
+
+var array<int> storedTimes = array.new_int()
+var array<int> storedHighTicks = array.new_int()
+var array<int> storedLowTicks = array.new_int()
+var array<float> storedVolumes = array.new_float()
+var int ringWriteIndex = 0
+var int lastStoredTime = na
+
+bool lowerTimeframeSupported = timeframe.in_seconds() > timeframe.in_seconds(SOURCE_TIMEFRAME)
+bool macroBandSupported = timeframe.in_seconds() <= timeframe.in_seconds(macroTF)
+bool researchMode = displayMode == "Research"
+
+if researchMode and lowerTimeframeSupported and barstate.isconfirmed
+    int safeCount = math.min(
+         math.min(requestedTimes.size(), requestedHighTicks.size()),
+         math.min(requestedLowTicks.size(), requestedVolumes.size()))
+    if safeCount > 0
+        for sourceIndex = 0 to safeCount - 1
+            int sourceTime = requestedTimes.get(sourceIndex)
+            int sourceHigh = requestedHighTicks.get(sourceIndex)
+            int sourceLow = requestedLowTicks.get(sourceIndex)
+            float sourceVolume = requestedVolumes.get(sourceIndex)
+            bool sourceValid = not na(sourceTime) and
+                 not na(sourceHigh) and
+                 not na(sourceLow) and
+                 not na(sourceVolume) and
+                 sourceVolume >= 0.0 and
+                 sourceHigh >= sourceLow
+            bool newSource = na(lastStoredTime) or sourceTime > lastStoredTime
+            if sourceValid and newSource
+                if storedTimes.size() < MAX_STORED_MINUTES
+                    storedTimes.push(sourceTime)
+                    storedHighTicks.push(sourceHigh)
+                    storedLowTicks.push(sourceLow)
+                    storedVolumes.push(sourceVolume)
+                else
+                    storedTimes.set(ringWriteIndex, sourceTime)
+                    storedHighTicks.set(ringWriteIndex, sourceHigh)
+                    storedLowTicks.set(ringWriteIndex, sourceLow)
+                    storedVolumes.set(ringWriteIndex, sourceVolume)
+                    ringWriteIndex := (ringWriteIndex + 1) % MAX_STORED_MINUTES
+                lastStoredTime := sourceTime
+
+
+// ============================================================================
+// DETERMINISTIC POC / CONTIGUOUS VALUE AREA CORE
+// Reuses the tie and expansion policy from the Phase 0 parity shell.
+// ============================================================================
+
+calculateProfile(
+     map<int, float> bins,
+     int minBin,
+     int maxBin,
+     float totalVolume,
+     int rowTicks) =>
+    bool valid = not na(minBin) and
+         not na(maxBin) and
+         maxBin >= minBin and
+         maxBin - minBin + 1 <= MAX_PROFILE_BINS and
+         bins.size() > 0 and
+         totalVolume > 0.0
+    int pocBin = na
+    int valueAreaLowBin = na
+    int valueAreaHighBin = na
+    float achievedPercent = na
+    float maximumVolume = na
+
+    if valid
+        float weightedCenter2 = 0.0
+        for bin = minBin to maxBin
+            float volumeAtBin = binVolume(bins, bin)
+            int center2 = 2 * bin * rowTicks + rowTicks
+            weightedCenter2 += volumeAtBin * center2
+            maximumVolume := na(maximumVolume) ? volumeAtBin : math.max(maximumVolume, volumeAtBin)
+
+        float meanCenter2 = weightedCenter2 / totalVolume
+        float bestDistance = na
+        float tieTolerance = math.max(0.000000001, math.abs(maximumVolume) * 0.000000000001)
+        for bin = minBin to maxBin
+            float volumeAtBin = binVolume(bins, bin)
+            if math.abs(volumeAtBin - maximumVolume) <= tieTolerance
+                int center2 = 2 * bin * rowTicks + rowTicks
+                float distance = math.abs(center2 - meanCenter2)
+                if na(bestDistance) or
+                 distance < bestDistance - 0.000000001 or
+                 (math.abs(distance - bestDistance) <= 0.000000001 and bin < pocBin)
+                    pocBin := bin
+                    bestDistance := distance
+
+        valid := not na(pocBin)
+        if valid
+            valueAreaLowBin := pocBin
+            valueAreaHighBin := pocBin
+            float includedVolume = binVolume(bins, pocBin)
+            float targetVolume = totalVolume * valueAreaPercent / 100.0
+            float volumeTolerance = math.max(0.000000001, math.abs(totalVolume) * 0.000000000001)
+            int expansionSteps = 0
+
+            while includedVolume < targetVolume - volumeTolerance and
+             expansionSteps < MAX_PROFILE_BINS
+                bool hasLower = valueAreaLowBin > minBin
+                bool hasUpper = valueAreaHighBin < maxBin
+                if not hasLower and not hasUpper
+                    break
+
+                int lowerCandidate = valueAreaLowBin - 1
+                int upperCandidate = valueAreaHighBin + 1
+                float lowerVolume = hasLower ? binVolume(bins, lowerCandidate) : na
+                float upperVolume = hasUpper ? binVolume(bins, upperCandidate) : na
+                float comparisonTolerance = math.max(
+                     0.000000001,
+                     math.max(
+                         hasLower ? math.abs(lowerVolume) : 0.0,
+                         hasUpper ? math.abs(upperVolume) : 0.0) * 0.000000000001)
+
+                bool chooseUpper = not hasLower
+                if hasLower and hasUpper
+                    if upperVolume > lowerVolume + comparisonTolerance
+                        chooseUpper := true
+                    else if lowerVolume > upperVolume + comparisonTolerance
+                        chooseUpper := false
+                    else
+                        int lowerDistance = math.abs(lowerCandidate - pocBin)
+                        int upperDistance = math.abs(upperCandidate - pocBin)
+                        chooseUpper := upperDistance <= lowerDistance
+
+                float selectedVolume = chooseUpper ? upperVolume : lowerVolume
+                if includedVolume + selectedVolume > targetVolume + volumeTolerance
+                    break
+                if chooseUpper
+                    valueAreaHighBin := upperCandidate
+                else
+                    valueAreaLowBin := lowerCandidate
+                includedVolume += selectedVolume
+                expansionSteps += 1
+
+            achievedPercent := includedVolume / totalVolume * 100.0
+
+    [valid, pocBin, valueAreaLowBin, valueAreaHighBin, achievedPercent, maximumVolume]
+
+findVolumeCliff(
+     map<int, float> bins,
+     int minBin,
+     int maxBin,
+     float totalVolume,
+     int windowRows) =>
+    int binCount = maxBin - minBin + 1
+    float meanVolume = binCount > 0 ? totalVolume / binCount : na
+    float variance = 0.0
+    if binCount > 0
+        for bin = minBin to maxBin
+            float difference = binVolume(bins, bin) - meanVolume
+            variance += difference * difference
+        variance /= binCount
+    float coefficientOfVariation = meanVolume > 0.0 ? math.sqrt(variance) / meanVolume : na
+
+    int bestBoundaryBin = na
+    float bestRatio = na
+    float bestScore = na
+    int firstBoundary = minBin + windowRows + 1
+    int lastBoundary = maxBin - windowRows
+    if firstBoundary <= lastBoundary and meanVolume > 0.0
+        for boundaryBin = firstBoundary to lastBoundary
+            float lowerSum = 0.0
+            float upperSum = 0.0
+            for sample = 1 to windowRows
+                lowerSum += binVolume(bins, boundaryBin - sample)
+                upperSum += binVolume(bins, boundaryBin + sample - 1)
+            float lowerMean = lowerSum / windowRows
+            float upperMean = upperSum / windowRows
+            float largerSide = math.max(lowerMean, upperMean)
+            float smallerSide = math.min(lowerMean, upperMean)
+            float denominator = math.max(smallerSide, meanVolume * 0.05)
+            float ratio = largerSide / denominator
+            bool interiorVolume = largerSide >= meanVolume and
+                 smallerSide >= meanVolume * 0.10
+            float score = ratio * math.pow(largerSide / meanVolume, 0.25)
+            if interiorVolume and (na(bestScore) or score > bestScore)
+                bestScore := score
+                bestRatio := ratio
+                bestBoundaryBin := boundaryBin
+
+    bool eligible = not na(bestBoundaryBin) and
+         not na(coefficientOfVariation) and
+         coefficientOfVariation >= minimumProfileCV and
+         bestRatio >= cliffRatioThreshold
+    [eligible, bestBoundaryBin, bestRatio, coefficientOfVariation]
+
+
+// ============================================================================
+// LAST-BAR RANGE SELECTION, PROFILE BUILD, AND DRAWING
+// ============================================================================
+
+var box rangeBox = na
+var box shelfBox = na
+var line shelfCenterLine = na
+var line pocLine = na
+var line valueAreaHighLine = na
+var line valueAreaLowLine = na
+var label statusLabel = na
+var array<line> histogramLines = array.new_line()
+float chartAtr = ta.atr(14)
+
+if barstate.islast
+    if not na(rangeBox)
+        box.delete(rangeBox)
+        rangeBox := na
+    if not na(shelfBox)
+        box.delete(shelfBox)
+        shelfBox := na
+    if not na(shelfCenterLine)
+        line.delete(shelfCenterLine)
+        shelfCenterLine := na
+    if not na(pocLine)
+        line.delete(pocLine)
+        pocLine := na
+    if not na(valueAreaHighLine)
+        line.delete(valueAreaHighLine)
+        valueAreaHighLine := na
+    if not na(valueAreaLowLine)
+        line.delete(valueAreaLowLine)
+        valueAreaLowLine := na
+    if not na(statusLabel)
+        label.delete(statusLabel)
+        statusLabel := na
+    clearLines(histogramLines)
+
+    float maxSlopeAbsolute = maxWallSlope * nz(chartAtr, 0.0)
+
+    bool primaryHighWall = not na(macroOuterHigh) and
+         not na(macroOuterHighTime) and
+         not na(macroPriorHigh) and
+         not na(macroPriorHighTime) and
+         macroOuterHigh > macroPriorHigh
+    bool shiftedHighWall = not primaryHighWall and
+         not na(macroPriorHigh) and
+         not na(macroPriorHighTime) and
+         not na(macroFarHigh) and
+         not na(macroFarHighTime) and
+         macroPriorHigh > macroFarHigh
+    bool primaryLowWall = not na(macroOuterLow) and
+         not na(macroOuterLowTime) and
+         not na(macroPriorLow) and
+         not na(macroPriorLowTime) and
+         macroOuterLow < macroPriorLow
+    bool shiftedLowWall = not primaryLowWall and
+         not na(macroPriorLow) and
+         not na(macroPriorLowTime) and
+         not na(macroFarLow) and
+         not na(macroFarLowTime) and
+         macroPriorLow < macroFarLow
+
+    bool highExpansion = not na(macroOuterHigh) and
+         not na(macroPriorHigh) and
+         not na(macroFarHigh) and
+         math.max(macroOuterHigh, macroPriorHigh) > macroFarHigh
+    bool lowExpansion = not na(macroOuterLow) and
+         not na(macroPriorLow) and
+         not na(macroFarLow) and
+         math.min(macroOuterLow, macroPriorLow) < macroFarLow
+    bool wallsAllowed = not wallRequireBothSides or (highExpansion and lowExpansion)
+
+    bool upperCandidateValid = false
+    int upperStartTime = na
+    int upperEndTime = na
+    float upperStartPrice = na
+    float upperEndPrice = na
+    bool lowerCandidateValid = false
+    int lowerStartTime = na
+    int lowerEndTime = na
+    float lowerStartPrice = na
+    float lowerEndPrice = na
+
+    if wallsAllowed and primaryHighWall
+        int outerBar = htfTimeToBar(macroOuterHighTime)
+        int priorBar = htfTimeToBar(macroPriorHighTime)
+        bool haveFar = not na(macroFarHigh) and
+             not na(macroFarHighTime) and
+             macroFarHigh < macroOuterHigh
+        bool useFar = haveFar
+        if haveFar
+            int farBar = htfTimeToBar(macroFarHighTime)
+            if farBar != outerBar
+                float spanSlope = (macroOuterHigh - macroFarHigh) / (outerBar - farBar)
+                float lineAtPrior = macroFarHigh + spanSlope * (priorBar - farBar)
+                useFar := macroPriorHigh <= lineAtPrior + syminfo.mintick
+        float anchorPrice = useFar ? macroFarHigh : macroPriorHigh
+        int anchorTime = useFar ? macroFarHighTime : macroPriorHighTime
+        int anchorBar = htfTimeToBar(anchorTime)
+        if anchorBar != outerBar
+            float slope = (macroOuterHigh - anchorPrice) / (outerBar - anchorBar)
+            upperCandidateValid := not hideSteepWalls or math.abs(slope) <= maxSlopeAbsolute
+            upperStartTime := anchorTime
+            upperEndTime := macroOuterHighTime
+            upperStartPrice := anchorPrice
+            upperEndPrice := macroOuterHigh
+    else if wallsAllowed and shiftedHighWall
+        int anchorBar = htfTimeToBar(macroFarHighTime)
+        int endBar = htfTimeToBar(macroPriorHighTime)
+        if anchorBar != endBar
+            float slope = (macroPriorHigh - macroFarHigh) / (endBar - anchorBar)
+            upperCandidateValid := not hideSteepWalls or math.abs(slope) <= maxSlopeAbsolute
+            upperStartTime := macroFarHighTime
+            upperEndTime := macroPriorHighTime
+            upperStartPrice := macroFarHigh
+            upperEndPrice := macroPriorHigh
+
+    if wallsAllowed and primaryLowWall
+        int outerBar = htfTimeToBar(macroOuterLowTime)
+        int priorBar = htfTimeToBar(macroPriorLowTime)
+        bool haveFar = not na(macroFarLow) and
+             not na(macroFarLowTime) and
+             macroFarLow > macroOuterLow
+        bool useFar = haveFar
+        if haveFar
+            int farBar = htfTimeToBar(macroFarLowTime)
+            if farBar != outerBar
+                float spanSlope = (macroOuterLow - macroFarLow) / (outerBar - farBar)
+                float lineAtPrior = macroFarLow + spanSlope * (priorBar - farBar)
+                useFar := macroPriorLow >= lineAtPrior - syminfo.mintick
+        float anchorPrice = useFar ? macroFarLow : macroPriorLow
+        int anchorTime = useFar ? macroFarLowTime : macroPriorLowTime
+        int anchorBar = htfTimeToBar(anchorTime)
+        if anchorBar != outerBar
+            float slope = (macroOuterLow - anchorPrice) / (outerBar - anchorBar)
+            lowerCandidateValid := not hideSteepWalls or math.abs(slope) <= maxSlopeAbsolute
+            lowerStartTime := anchorTime
+            lowerEndTime := macroOuterLowTime
+            lowerStartPrice := anchorPrice
+            lowerEndPrice := macroOuterLow
+    else if wallsAllowed and shiftedLowWall
+        int anchorBar = htfTimeToBar(macroFarLowTime)
+        int endBar = htfTimeToBar(macroPriorLowTime)
+        if anchorBar != endBar
+            float slope = (macroPriorLow - macroFarLow) / (endBar - anchorBar)
+            lowerCandidateValid := not hideSteepWalls or math.abs(slope) <= maxSlopeAbsolute
+            lowerStartTime := macroFarLowTime
+            lowerEndTime := macroPriorLowTime
+            lowerStartPrice := macroFarLow
+            lowerEndPrice := macroPriorLow
+
+    // When both walls exist, the wall with the most recent structural endpoint
+    // defines the active auction cycle. Equal endpoints prefer the longer span.
+    bool useLowerCandidate = lowerCandidateValid and
+         (not upperCandidateValid or
+          lowerEndTime > upperEndTime or
+          (lowerEndTime == upperEndTime and
+           lowerEndTime - lowerStartTime >= upperEndTime - upperStartTime))
+    bool rangeSelected = upperCandidateValid or lowerCandidateValid
+    int selectedStartMacroTime = useLowerCandidate ? lowerStartTime : upperStartTime
+    int selectedEndMacroTime = useLowerCandidate ? lowerEndTime : upperEndTime
+    float selectedStartPrice = useLowerCandidate ? lowerStartPrice : upperStartPrice
+    float selectedEndPrice = useLowerCandidate ? lowerEndPrice : upperEndPrice
+    string selectedSide = useLowerCandidate ? "LOW WALL" : "HIGH WALL"
+    int macroDurationMs = int(timeframe.in_seconds(macroTF) * 1000)
+    int chartDurationMs = int(timeframe.in_seconds() * 1000)
+    int selectedStartTime = selectedStartMacroTime
+    int selectedEndBarTime = selectedEndMacroTime
+
+    // RSD stores the opening time of the Macro candle containing each pivot.
+    // Refine that event to the chart bar that actually printed the pivot price,
+    // so a 15m/30m native FRVP can be placed on the visible swing bars.
+    if rangeSelected
+        int refinementBars = math.min(bar_index, 4999)
+        for offset = 0 to refinementBars
+            bool inStartMacroBar = time[offset] >= selectedStartMacroTime and
+                 time[offset] < selectedStartMacroTime + macroDurationMs
+            bool inEndMacroBar = time[offset] >= selectedEndMacroTime and
+                 time[offset] < selectedEndMacroTime + macroDurationMs
+            bool startPriceMatch = useLowerCandidate ?
+                 math.abs(low[offset] - selectedStartPrice) <= syminfo.mintick * 0.5 :
+                 math.abs(high[offset] - selectedStartPrice) <= syminfo.mintick * 0.5
+            bool endPriceMatch = useLowerCandidate ?
+                 math.abs(low[offset] - selectedEndPrice) <= syminfo.mintick * 0.5 :
+                 math.abs(high[offset] - selectedEndPrice) <= syminfo.mintick * 0.5
+            if inStartMacroBar and startPriceMatch
+                selectedStartTime := time[offset]
+            if inEndMacroBar and endPriceMatch
+                selectedEndBarTime := time[offset]
+
+    int selectedEndExclusive = rangeSelected ? selectedEndBarTime + chartDurationMs : na
+    rangeSelected := rangeSelected and
+         macroBandSupported and
+         not na(selectedStartTime) and
+         not na(selectedEndExclusive) and
+         selectedStartTime < selectedEndExclusive
+
+    float outlineHigh = na
+    float outlineLow = na
+    if rangeSelected
+        int scanBars = math.min(bar_index, 4999)
+        for offset = 0 to scanBars
+            bool barInside = time[offset] >= selectedStartTime and
+                 time[offset] < selectedEndExclusive
+            if barInside
+                outlineHigh := na(outlineHigh) ? high[offset] : math.max(outlineHigh, high[offset])
+                outlineLow := na(outlineLow) ? low[offset] : math.min(outlineLow, low[offset])
+
+    if rangeSelected and not na(outlineHigh) and not na(outlineLow)
+        rangeBox := box.new(
+             left = selectedStartTime,
+             top = outlineHigh,
+             right = selectedEndExclusive,
+             bottom = outlineLow,
+             xloc = xloc.bar_time,
+             border_color = color.new(rangeColor, 25),
+             border_width = 1,
+             border_style = line.style_dashed,
+             bgcolor = color.new(rangeColor, 96))
+
+    map<int, float> profileBins = map.new<int, float>()
+    int sourceCount = storedTimes.size()
+    int oldestPhysicalIndex = sourceCount < MAX_STORED_MINUTES ? 0 : ringWriteIndex
+    int oldestSourceTime = sourceCount > 0 ? storedTimes.get(oldestPhysicalIndex) : na
+    int newestPhysicalIndex = sourceCount > 0 ?
+         (sourceCount < MAX_STORED_MINUTES ? sourceCount - 1 :
+          (ringWriteIndex - 1 + MAX_STORED_MINUTES) % MAX_STORED_MINUTES) : na
+    int newestSourceTime = sourceCount > 0 ? storedTimes.get(newestPhysicalIndex) : na
+    bool sourceCoversRange = researchMode and
+         rangeSelected and
+         sourceCount > 0 and
+         oldestSourceTime <= selectedStartTime and
+         newestSourceTime >= selectedEndExclusive - MINUTE_MS
+
+    int rangeMinTick = na
+    int rangeMaxTick = na
+    int includedMinutes = 0
+    if sourceCoversRange
+        for logicalIndex = 0 to sourceCount - 1
+            int physicalIndex = sourceCount < MAX_STORED_MINUTES ?
+                 logicalIndex :
+                 (ringWriteIndex + logicalIndex) % MAX_STORED_MINUTES
+            int sourceTime = storedTimes.get(physicalIndex)
+            if sourceTime >= selectedStartTime and sourceTime < selectedEndExclusive
+                int sourceLow = storedLowTicks.get(physicalIndex)
+                int sourceHigh = storedHighTicks.get(physicalIndex)
+                rangeMinTick := na(rangeMinTick) ? sourceLow : math.min(rangeMinTick, sourceLow)
+                rangeMaxTick := na(rangeMaxTick) ? sourceHigh : math.max(rangeMaxTick, sourceHigh)
+                includedMinutes += 1
+
+    int rowTicks = not na(rangeMinTick) and not na(rangeMaxTick) ?
+         math.max(1, int(math.ceil((rangeMaxTick - rangeMinTick + 1) / float(targetRows)))) : na
+    int profileMinBin = na
+    int profileMaxBin = na
+    float totalProfileVolume = 0.0
+    bool profileOverflow = false
+
+    if sourceCoversRange and includedMinutes > 0 and not na(rowTicks)
+        for logicalIndex = 0 to sourceCount - 1
+            int physicalIndex = sourceCount < MAX_STORED_MINUTES ?
+                 logicalIndex :
+                 (ringWriteIndex + logicalIndex) % MAX_STORED_MINUTES
+            int sourceTime = storedTimes.get(physicalIndex)
+            if sourceTime >= selectedStartTime and sourceTime < selectedEndExclusive
+                int sourceLowBin = int(math.floor(storedLowTicks.get(physicalIndex) / float(rowTicks)))
+                int sourceHighBin = int(math.floor(storedHighTicks.get(physicalIndex) / float(rowTicks)))
+                int touchedBins = sourceHighBin - sourceLowBin + 1
+                float sourceVolume = storedVolumes.get(physicalIndex)
+                float volumePerBin = touchedBins > 0 ? sourceVolume / touchedBins : 0.0
+                for bin = sourceLowBin to sourceHighBin
+                    float previousVolume = binVolume(profileBins, bin)
+                    profileBins.put(bin, previousVolume + volumePerBin)
+                profileMinBin := na(profileMinBin) ? sourceLowBin : math.min(profileMinBin, sourceLowBin)
+                profileMaxBin := na(profileMaxBin) ? sourceHighBin : math.max(profileMaxBin, sourceHighBin)
+                totalProfileVolume += sourceVolume
+                profileOverflow := profileOverflow or
+                     profileMaxBin - profileMinBin + 1 > MAX_PROFILE_BINS
+
+    [profileValidRaw,
+     pocBin,
+     valueAreaLowBin,
+     valueAreaHighBin,
+     achievedValueAreaPercent,
+     maximumBinVolume] = calculateProfile(
+         profileBins,
+         profileMinBin,
+         profileMaxBin,
+         totalProfileVolume,
+         nz(rowTicks, 1))
+    bool profileValid = sourceCoversRange and
+         not profileOverflow and
+         includedMinutes > 0 and
+         profileValidRaw
+
+    bool shelfEligible = false
+    int shelfBoundaryBin = na
+    float shelfRatio = na
+    float profileCV = na
+    if profileValid
+        [cliffEligible,
+         cliffBoundary,
+         detectedRatio,
+         detectedCV] = findVolumeCliff(
+             profileBins,
+             profileMinBin,
+             profileMaxBin,
+             totalProfileVolume,
+             cliffWindow)
+        shelfEligible := cliffEligible
+        shelfBoundaryBin := cliffBoundary
+        shelfRatio := detectedRatio
+        profileCV := detectedCV
+
+    float pocPrice = profileValid ?
+         (pocBin * rowTicks + rowTicks * 0.5) * syminfo.mintick : na
+    float valueAreaLowPrice = profileValid ?
+         valueAreaLowBin * rowTicks * syminfo.mintick : na
+    float valueAreaHighPrice = profileValid ?
+         (valueAreaHighBin + 1) * rowTicks * syminfo.mintick : na
+    float shelfPrice = shelfEligible ?
+         shelfBoundaryBin * rowTicks * syminfo.mintick : na
+    float shelfHalfWidth = not na(rowTicks) ?
+         rowTicks * syminfo.mintick * 0.5 : na
+
+    if researchMode and profileValid and shelfEligible and showShelf
+        shelfBox := box.new(
+             left = selectedStartTime,
+             top = shelfPrice + shelfHalfWidth,
+             right = selectedEndExclusive,
+             bottom = shelfPrice - shelfHalfWidth,
+             xloc = xloc.bar_time,
+             border_color = color.new(shelfColor, 75),
+             border_width = 1,
+             bgcolor = color.new(shelfColor, 90))
+        shelfCenterLine := line.new(
+             x1 = selectedStartTime,
+             y1 = shelfPrice,
+             x2 = selectedEndExclusive,
+             y2 = shelfPrice,
+             xloc = xloc.bar_time,
+             color = color.new(shelfColor, 5),
+             width = 1)
+
+    if researchMode and profileValid
+        int histogramWidthMs = int((selectedEndExclusive - selectedStartTime) * 0.22)
+        for bin = profileMinBin to profileMaxBin
+            float volumeAtBin = binVolume(profileBins, bin)
+            float relativeWidth = maximumBinVolume > 0.0 ? volumeAtBin / maximumBinVolume : 0.0
+            int histogramStart = selectedEndExclusive - int(histogramWidthMs * relativeWidth)
+            float rowCenterPrice = (bin * rowTicks + rowTicks * 0.5) * syminfo.mintick
+            line histogramLine = line.new(
+                 x1 = histogramStart,
+                 y1 = rowCenterPrice,
+                 x2 = selectedEndExclusive,
+                 y2 = rowCenterPrice,
+                 xloc = xloc.bar_time,
+                 color = color.new(rangeColor, 72),
+                 width = 2)
+            histogramLines.push(histogramLine)
+
+        pocLine := line.new(
+             x1 = selectedStartTime,
+             y1 = pocPrice,
+             x2 = selectedEndExclusive,
+             y2 = pocPrice,
+             xloc = xloc.bar_time,
+             color = color.new(#ffb74d, 10),
+             width = 2)
+        valueAreaHighLine := line.new(
+             x1 = selectedStartTime,
+             y1 = valueAreaHighPrice,
+             x2 = selectedEndExclusive,
+             y2 = valueAreaHighPrice,
+             xloc = xloc.bar_time,
+             color = color.new(#b0bec5, 25),
+             style = line.style_dotted)
+        valueAreaLowLine := line.new(
+             x1 = selectedStartTime,
+             y1 = valueAreaLowPrice,
+             x2 = selectedEndExclusive,
+             y2 = valueAreaLowPrice,
+             xloc = xloc.bar_time,
+             color = color.new(#b0bec5, 25),
+             style = line.style_dotted)
+
+    string statusText = ""
+    color statusTextColor = color.new(rangeColor, 0)
+    float statusPrice = not na(outlineHigh) ? outlineHigh : close
+    if not lowerTimeframeSupported
+        statusText := "VP RSD EXP • USE 15m/30m CHART"
+        statusTextColor := color.orange
+    else if not macroBandSupported
+        statusText := "VP RSD EXP • CHART MUST BE ≤ MACRO TF"
+        statusTextColor := color.orange
+    else if not rangeSelected
+        statusText := "VP RSD EXP • NO ACTIVE MACRO WALL"
+        statusTextColor := color.new(color.gray, 15)
+    else if not researchMode
+        statusText := "RSD " + selectedSide + " RANGE • APPLY NATIVE FRVP"
+    else if not sourceCoversRange
+        statusText := "RSD " + selectedSide +
+             " RANGE • APPLY NATIVE FRVP\nAPPROX ENGINE: SOURCE INCOMPLETE"
+        statusTextColor := color.orange
+    else if not profileValid
+        statusText := "RSD " + selectedSide +
+             " RANGE • APPLY NATIVE FRVP\nAPPROX ENGINE: INVALID"
+        statusTextColor := color.orange
+    else
+        string shelfText = researchMode and shelfEligible and showShelf ?
+             " • ILLUSTRATIVE TRANSITION " + str.tostring(shelfPrice, format.mintick) :
+             ""
+        statusText := "RSD " + selectedSide +
+             " • APPLY NATIVE FRVP\nAPPROX 1m OHLCV • NON-EVALUABLE" +
+             shelfText
+        if researchMode
+            statusText += "\nPOC " + str.tostring(pocPrice, format.mintick) +
+                 "  VA " + str.tostring(valueAreaLowPrice, format.mintick) +
+                 "–" + str.tostring(valueAreaHighPrice, format.mintick) +
+                 "  CV " + str.tostring(profileCV, "#.00") +
+                 "  shape-ratio " + str.tostring(shelfRatio, "#.00") +
+                 "x  VA% " + str.tostring(achievedValueAreaPercent, "#.0")
+
+    int labelTime = rangeSelected ? selectedEndExclusive : time
+    statusLabel := label.new(
+         x = labelTime,
+         y = statusPrice,
+         text = statusText,
+         xloc = xloc.bar_time,
+         style = label.style_label_left,
+         color = color.new(color.black, 80),
+         textcolor = statusTextColor,
+         size = size.tiny)

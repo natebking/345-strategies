@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vpx-behavior-1.json",
+  "title": "VPX Phase 0 first-touch behavior report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "evaluator_version",
+    "accepted",
+    "status",
+    "input",
+    "policy",
+    "session",
+    "profile",
+    "levels",
+    "errors",
+    "interpretation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "vpx.behavior/1"
+    },
+    "evaluator_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "accepted": {
+      "type": "boolean"
+    },
+    "status": {
+      "enum": [
+        "evaluated",
+        "rejected"
+      ]
+    },
+    "input": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "policy": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "session": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "profile": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "levels": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/level"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/error"
+      }
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "accepted": {
+            "const": true
+          }
+        },
+        "required": [
+          "accepted"
+        ]
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "evaluated"
+          },
+          "input": {
+            "type": "object"
+          },
+          "policy": {
+            "type": "object"
+          },
+          "session": {
+            "type": "object"
+          },
+          "profile": {
+            "type": "object"
+          },
+          "levels": {
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "errors": {
+            "maxItems": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "status": {
+            "const": "rejected"
+          },
+          "levels": {
+            "maxItems": 0
+          },
+          "errors": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "details": {
+          "type": "object"
+        }
+      }
+    },
+    "level": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level_type",
+        "reference_ticks",
+        "zone_low_ticks",
+        "zone_high_ticks",
+        "touch",
+        "horizons",
+        "touch_search_censoring"
+      ],
+      "properties": {
+        "level_type": {
+          "enum": [
+            "POC",
+            "VAH",
+            "VAL"
+          ]
+        },
+        "reference_ticks": {
+          "type": "integer"
+        },
+        "zone_low_ticks": {
+          "type": "integer"
+        },
+        "zone_high_ticks": {
+          "type": "integer"
+        },
+        "touch": {
+          "type": "object"
+        },
+        "horizons": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "touch_search_censoring": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

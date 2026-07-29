@@ -1,0 +1,1163 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// at https://mozilla.org/MPL/2.0/
+// © 2026 TheStratSuite contributors
+//@version=6
+
+// Slice 1 only: headless source/profile parity shell.
+// This is not a trading indicator and contains no lifecycle or rendering logic.
+indicator(
+     "VP Research Preview v0.2.0 — Profile Parity Shell",
+     shorttitle = "VP v0.2 Profile Shell",
+     overlay = true,
+     max_bars_back = 5000)
+
+
+// ============================================================================
+// IMMUTABLE SLICE 1 CONTRACT
+// ============================================================================
+
+const string SCRIPT_VERSION = "0.2.0-slice1"
+const string SOURCE_TIMEFRAME = "1"
+const string RTH_SESSION = "0830-1515:23456"
+const string RTH_TIMEZONE = "America/Chicago"
+const string EXPECTED_CHART_SESSION = "regular"
+const float EXPECTED_MINTICK = 0.25
+const int MINUTE_MS = 60000
+const int PRIMITIVE_TICKS = 1
+const int GRID_ORIGIN_TICKS = 0
+const int RTH_EXPECTED_MINUTES = 405
+const int MAX_PROFILE_BINS = 2048
+const int VOLUME_SCALE = 1000
+
+// These names intentionally match the Phase 0 parity core. They are constants,
+// not inputs. v0.2 Slice 1 has no user-configurable row size or VA target.
+const int outputTicksInput = 4
+const float valueAreaPercentInput = 70.0
+
+const int HASH_MODULUS = 2147483629
+const int HASH_MULTIPLIER = 1103515245
+const int HASH_INCREMENT = 12345
+const int HASH_SEED = 146959810
+const int HASH_NA = 2147483587
+const string FP_ALGORITHM = "fold31_v1"
+const string PATH_FP_ALGORITHM = "fold31_ohlc_close_v1"
+const string UNSET_SETTINGS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
+const string POC_ALGORITHM = "max_nearest_weighted_mean_lower"
+const string VA_ALGORITHM = "contiguous_larger_nearer_upper_no_overshoot"
+const string PRIOR_RTH_SELECTION = "latest_complete_end_lte_measurement_start"
+const string ROW_MAPPING_ALGORITHM = "midpoint_round_tick_floor_global"
+
+const int ERR_UNSUPPORTED_ENVIRONMENT = 1
+const int ERR_FOOTPRINT_UNAVAILABLE = 2
+const int ERR_RTH_INCOMPLETE = 4
+const int ERR_PRIMITIVE_ROW = 8
+const int ERR_BIN_CAP = 16
+const int ERR_VOLUME_RECONCILIATION = 32
+const int ERR_INVALID_CONFIG = 64
+const int ERR_SOURCE_ARRAYS = 128
+const int ERR_SOURCE_SEQUENCE = 256
+const int ERR_SOURCE_OHLC = 512
+const int ERR_PATH_INCOMPLETE = 1024
+
+
+// ============================================================================
+// BOUNDED AUDIT ENVELOPE
+// ============================================================================
+
+string identityGroup = "Run identity (manifest supplied)"
+string logicalRunIdInput = input.string(
+     "vp_v02_slice1_logical_001",
+     "Logical run ID",
+     group = identityGroup)
+int logicalRunTokenInput = input.int(
+     1,
+     "Logical run token",
+     minval = 0,
+     maxval = 2147483647,
+     group = identityGroup)
+string attemptIdInput = input.string(
+     "attempt_001",
+     "Attempt ID",
+     group = identityGroup)
+int attemptTokenInput = input.int(
+     1,
+     "Attempt token",
+     minval = 0,
+     maxval = 2147483647,
+     group = identityGroup)
+int configTokenInput = input.int(
+     1,
+     "Configuration token",
+     minval = 0,
+     maxval = 2147483647,
+     group = identityGroup)
+string pineSettingsHashInput = input.string(
+     "0000000000000000000000000000000000000000000000000000000000000000",
+     "Expected Pine-settings hash",
+     group = identityGroup)
+string expectedTickerInput = input.string(
+     "ESU2026",
+     "Exact actual-month ticker",
+     group = identityGroup)
+
+string windowGroup = "Current RTH audit window (half-open)"
+int measurementStartInput = input.time(
+     timestamp("24 Jul 2026 13:30 +0000"),
+     "Current RTH start",
+     group = windowGroup)
+int measurementEndInput = input.time(
+     timestamp("24 Jul 2026 20:15 +0000"),
+     "Current RTH end",
+     group = windowGroup)
+
+
+// ============================================================================
+// PHASE 0 PROFILE PARITY CORE — COPIED WITHOUT SEMANTIC CHANGE
+// ============================================================================
+
+hashFold(int state, int value) =>
+    int normalized = na(value) ? HASH_NA : math.abs(value % HASH_MODULUS)
+    int mixed = int((state * HASH_MULTIPLIER + normalized + HASH_INCREMENT) % HASH_MODULUS)
+    mixed < 0 ? -mixed : mixed
+
+priceToTicks(float price) =>
+    na(price) ? na : int(math.round(price / syminfo.mintick))
+
+volumeToFingerprintInt(float value) =>
+    na(value) ? na : int(math.round(value * VOLUME_SCALE))
+
+intText(int value) =>
+    na(value) ? "NA" : str.tostring(value)
+
+floatText(float value) =>
+    na(value) ? "NA" : str.tostring(value, "#.########")
+
+boolText(bool value) =>
+    value ? "1" : "0"
+
+safeIdentity(string value) =>
+    str.length(value) > 0 and
+     not str.contains(value, "|")
+
+validSha256(string value) =>
+    bool valid = str.length(value) == 64 and
+         value != UNSET_SETTINGS_HASH
+    if valid
+        for characterIndex = 0 to 63
+            string character = str.substring(
+                 value,
+                 characterIndex,
+                 characterIndex + 1)
+            valid := valid and
+                 str.contains("0123456789abcdef", character)
+    valid
+
+// Mutates only the referenced map. Scalar state is returned to the caller.
+boundedPut(map<int, float> bins, int key, float addedVolume, int currentMin, int currentMax) =>
+    bool alreadyPresent = bins.contains(key)
+    int candidateMin = na(currentMin) ? key : math.min(currentMin, key)
+    int candidateMax = na(currentMax) ? key : math.max(currentMax, key)
+    int candidateSpan = candidateMax - candidateMin + 1
+    bool overflow = candidateSpan > MAX_PROFILE_BINS or
+     (not alreadyPresent and bins.size() >= MAX_PROFILE_BINS)
+    int nextMin = currentMin
+    int nextMax = currentMax
+    if not overflow
+        float previousVolume = alreadyPresent ? bins.get(key) : 0.0
+        bins.put(key, previousVolume + addedVolume)
+        nextMin := candidateMin
+        nextMax := candidateMax
+    [nextMin, nextMax, overflow]
+
+// Calculates a deterministic range-wide profile on the fixed global grid.
+// POC ties: nearest bin center to the volume-weighted mean, then lower bin.
+// VA: compare the next contiguous bins, prefer larger volume, then nearer POC,
+// then upper. Stop instead of adding a bin that would overshoot the 70% target.
+calculateProfile(map<int, float> bins, int minBin, int maxBin, float totalVolume) =>
+    bool valid = not na(minBin) and not na(maxBin) and
+     maxBin >= minBin and maxBin - minBin + 1 <= MAX_PROFILE_BINS and
+     bins.size() > 0 and not na(totalVolume) and totalVolume > 0.0
+    int pocBin = na
+    int vaLowBin = na
+    int vaHighBin = na
+    float achievedPercent = na
+    float pocVolume = na
+
+    if valid
+        float maximumVolume = na
+        float weightedCenter2 = 0.0
+        for bin = minBin to maxBin
+            float binVolume = bins.contains(bin) ? bins.get(bin) : 0.0
+            int center2 = 2 * (GRID_ORIGIN_TICKS + bin * outputTicksInput) + outputTicksInput
+            weightedCenter2 += binVolume * center2
+            maximumVolume := na(maximumVolume) ? binVolume : math.max(maximumVolume, binVolume)
+
+        float meanCenter2 = weightedCenter2 / totalVolume
+        float bestDistance = na
+        float pocTieTolerance = math.max(0.000000001, math.abs(maximumVolume) * 0.000000000001)
+        for bin = minBin to maxBin
+            float binVolume = bins.contains(bin) ? bins.get(bin) : 0.0
+            if math.abs(binVolume - maximumVolume) <= pocTieTolerance
+                int center2 = 2 * (GRID_ORIGIN_TICKS + bin * outputTicksInput) + outputTicksInput
+                float distance = math.abs(center2 - meanCenter2)
+                if na(bestDistance) or distance < bestDistance - 0.000000001 or
+                 (math.abs(distance - bestDistance) <= 0.000000001 and bin < pocBin)
+                    pocBin := bin
+                    bestDistance := distance
+
+        valid := not na(pocBin)
+        if valid
+            pocVolume := bins.contains(pocBin) ? bins.get(pocBin) : 0.0
+            vaLowBin := pocBin
+            vaHighBin := pocBin
+            float includedVolume = pocVolume
+            float targetVolume = totalVolume * valueAreaPercentInput / 100.0
+            float volumeTolerance = math.max(0.000000001, math.abs(totalVolume) * 0.000000000001)
+            int expansionSteps = 0
+
+            while includedVolume < targetVolume - volumeTolerance and
+             expansionSteps < MAX_PROFILE_BINS
+                bool hasLower = vaLowBin > minBin
+                bool hasUpper = vaHighBin < maxBin
+                if not hasLower and not hasUpper
+                    break
+
+                int lowerCandidate = vaLowBin - 1
+                int upperCandidate = vaHighBin + 1
+                float lowerVolume = hasLower ? (bins.contains(lowerCandidate) ? bins.get(lowerCandidate) : 0.0) : na
+                float upperVolume = hasUpper ? (bins.contains(upperCandidate) ? bins.get(upperCandidate) : 0.0) : na
+                float comparisonTolerance = math.max(
+                     0.000000001,
+                     math.max(
+                         hasLower ? math.abs(lowerVolume) : 0.0,
+                         hasUpper ? math.abs(upperVolume) : 0.0) * 0.000000000001)
+
+                bool chooseUpper = not hasLower
+                if hasLower and hasUpper
+                    if upperVolume > lowerVolume + comparisonTolerance
+                        chooseUpper := true
+                    else if lowerVolume > upperVolume + comparisonTolerance
+                        chooseUpper := false
+                    else
+                        int lowerDistance = math.abs(lowerCandidate - pocBin)
+                        int upperDistance = math.abs(upperCandidate - pocBin)
+                        chooseUpper := upperDistance < lowerDistance or upperDistance == lowerDistance
+
+                float selectedVolume = chooseUpper ? upperVolume : lowerVolume
+                if includedVolume + selectedVolume > targetVolume + volumeTolerance
+                    break
+
+                if chooseUpper
+                    vaHighBin := upperCandidate
+                else
+                    vaLowBin := lowerCandidate
+                includedVolume += selectedVolume
+                expansionSteps += 1
+
+            achievedPercent := includedVolume / totalVolume * 100.0
+
+    [valid, pocBin, vaLowBin, vaHighBin, achievedPercent, pocVolume]
+
+freezeProfile(
+     map<int, float> bins,
+     int minBin,
+     int maxBin,
+     float totalVolume,
+     bool baseComplete) =>
+    [algorithmValid, pocBin, vaLowBin, vaHighBin, achievedPercent, pocVolume] =
+         calculateProfile(bins, minBin, maxBin, totalVolume)
+    bool complete = baseComplete and algorithmValid
+    int pocTicks = complete ? GRID_ORIGIN_TICKS + pocBin * outputTicksInput + int(outputTicksInput / 2) : na
+    int vahTicks = complete ? GRID_ORIGIN_TICKS + (vaHighBin + 1) * outputTicksInput : na
+    int valTicks = complete ? GRID_ORIGIN_TICKS + vaLowBin * outputTicksInput : na
+    [complete, pocTicks, vahTicks, valTicks, complete ? achievedPercent : na, complete ? pocVolume : na]
+
+
+// ============================================================================
+// ONE FIXED SOURCE REQUEST AND STRUCTURED RECORD HELPERS
+// ============================================================================
+
+// The footprint value stays inside this payload. Row collections are consumed
+// only after the lower-timeframe request returns its array of footprint objects.
+oneMinutePayload() =>
+    footprint fp = request.footprint(PRIMITIVE_TICKS, va_percent = valueAreaPercentInput)
+    int openTicks = priceToTicks(open)
+    int highTicks = priceToTicks(high)
+    int lowTicks = priceToTicks(low)
+    int closeTicks = priceToTicks(close)
+    bool ohlcTickAligned = not na(open) and not na(high) and
+     not na(low) and not na(close) and
+     math.abs(open / syminfo.mintick - openTicks) <= 0.000001 and
+     math.abs(high / syminfo.mintick - highTicks) <= 0.000001 and
+     math.abs(low / syminfo.mintick - lowTicks) <= 0.000001 and
+     math.abs(close / syminfo.mintick - closeTicks) <= 0.000001
+    bool inRth = not na(time(SOURCE_TIMEFRAME, RTH_SESSION, RTH_TIMEZONE))
+    int dayKey = year(time, RTH_TIMEZONE) * 10000 +
+     month(time, RTH_TIMEZONE) * 100 +
+     dayofmonth(time, RTH_TIMEZONE)
+    [time, time_close, fp, inRth, dayKey,
+     openTicks, highTicks, lowTicks, closeTicks, ohlcTickAligned]
+
+pathMinuteFingerprint(
+     int sourceTime,
+     int sourceCloseTime,
+     int openTicks,
+     int highTicks,
+     int lowTicks,
+     int closeTicks) =>
+    int fingerprint = hashFold(HASH_SEED, sourceTime)
+    fingerprint := hashFold(fingerprint, sourceCloseTime)
+    fingerprint := hashFold(fingerprint, openTicks)
+    fingerprint := hashFold(fingerprint, highTicks)
+    fingerprint := hashFold(fingerprint, lowTicks)
+    hashFold(fingerprint, closeTicks)
+
+vpx2Record(string kind, string severity, int sequence, string fields) =>
+    "VPX2|schema=1|kind=" + kind +
+     "|severity=" + severity +
+     "|seq=" + str.tostring(sequence) +
+     "|logical_run_id=" + logicalRunIdInput +
+     "|attempt_id=" + attemptIdInput +
+     "|attempt_token=" + str.tostring(attemptTokenInput) +
+     "|config_token=" + str.tostring(configTokenInput) +
+     fields
+
+emitInfo(int sequence, string kind, string fields) =>
+    int nextSequence = sequence + 1
+    log.info(vpx2Record(kind, "INFO", nextSequence, fields))
+    nextSequence
+
+emitWarning(int sequence, string kind, string fields) =>
+    int nextSequence = sequence + 1
+    log.warning(vpx2Record(kind, "WARN", nextSequence, fields))
+    nextSequence
+
+emitError(int sequence, string kind, string fields) =>
+    int nextSequence = sequence + 1
+    log.error(vpx2Record(kind, "ERROR", nextSequence, fields))
+    nextSequence
+
+
+// ============================================================================
+// CONFIGURATION AND SOURCE ARRAYS
+// ============================================================================
+
+int chartSeconds = timeframe.in_seconds()
+bool displayTimeframeSupported = timeframe.isminutes and
+     (chartSeconds == 60 or chartSeconds == 300 or
+      chartSeconds == 900 or chartSeconds == 3600)
+bool chartSupported = chart.is_standard and displayTimeframeSupported
+bool chartSessionSupported = syminfo.session == EXPECTED_CHART_SESSION
+bool rootSupported = syminfo.root == "ES" or syminfo.root == "MES"
+bool actualMonthFormat = false
+if rootSupported
+    int rootLength = syminfo.root == "ES" ? 2 : 3
+    bool lengthValid = str.length(syminfo.ticker) == rootLength + 5
+    if lengthValid
+        string tickerRoot = str.substring(syminfo.ticker, 0, rootLength)
+        string monthCode = str.substring(syminfo.ticker, rootLength, rootLength + 1)
+        string yearText = str.substring(syminfo.ticker, rootLength + 1, rootLength + 5)
+        actualMonthFormat := tickerRoot == syminfo.root and
+             str.contains("FGHJKMNQUVXZ", monthCode) and
+             not na(str.tonumber(yearText))
+
+bool symbolSupported = syminfo.type == "futures" and
+     rootSupported and actualMonthFormat and
+     syminfo.ticker == expectedTickerInput and
+     not str.contains(syminfo.ticker, "!")
+bool tickSupported = math.abs(syminfo.mintick - EXPECTED_MINTICK) <= 0.000000001
+bool environmentSupported = chartSupported and chartSessionSupported and
+     symbolSupported and tickSupported
+
+bool logicalRunIdValid = safeIdentity(logicalRunIdInput)
+bool attemptIdValid = safeIdentity(attemptIdInput)
+bool pineHashSafe = safeIdentity(pineSettingsHashInput)
+bool pineHashValid = pineHashSafe and
+     validSha256(pineSettingsHashInput)
+bool expectedTickerSafe = safeIdentity(expectedTickerInput)
+bool identityValid = logicalRunIdValid and attemptIdValid and
+     pineHashValid and expectedTickerSafe
+bool measurementEndpointsAligned = measurementStartInput % MINUTE_MS == 0 and
+     measurementEndInput % MINUTE_MS == 0
+bool measurementWindowValid = measurementStartInput < measurementEndInput and
+     measurementEndpointsAligned and
+     int((measurementEndInput - measurementStartInput) / MINUTE_MS) ==
+         RTH_EXPECTED_MINUTES and
+     hour(measurementStartInput, RTH_TIMEZONE) == 8 and
+     minute(measurementStartInput, RTH_TIMEZONE) == 30 and
+     hour(measurementEndInput, RTH_TIMEZONE) == 15 and
+     minute(measurementEndInput, RTH_TIMEZONE) == 15
+bool configurationValid = identityValid and measurementWindowValid
+bool requestSupported = environmentSupported and configurationValid
+
+array<int> sourceTimes = na
+array<int> sourceCloseTimes = na
+array<footprint> sourceFootprints = na
+array<bool> sourceRthFlags = na
+array<int> sourceDayKeys = na
+array<int> sourceOpenTicks = na
+array<int> sourceHighTicks = na
+array<int> sourceLowTicks = na
+array<int> sourceCloseTicks = na
+array<bool> sourceOhlcAlignedFlags = na
+
+if requestSupported
+    [requestedTimes, requestedCloseTimes, requestedFootprints,
+     requestedRthFlags, requestedDayKeys, requestedOpenTicks,
+     requestedHighTicks, requestedLowTicks, requestedCloseTicks,
+     requestedOhlcAlignedFlags] =
+         request.security_lower_tf(
+             syminfo.tickerid,
+             SOURCE_TIMEFRAME,
+             oneMinutePayload(),
+             ignore_invalid_timeframe = true)
+    sourceTimes := requestedTimes
+    sourceCloseTimes := requestedCloseTimes
+    sourceFootprints := requestedFootprints
+    sourceRthFlags := requestedRthFlags
+    sourceDayKeys := requestedDayKeys
+    sourceOpenTicks := requestedOpenTicks
+    sourceHighTicks := requestedHighTicks
+    sourceLowTicks := requestedLowTicks
+    sourceCloseTicks := requestedCloseTicks
+    sourceOhlcAlignedFlags := requestedOhlcAlignedFlags
+
+
+// ============================================================================
+// PRIOR-RTH PROFILE AND ONE-MINUTE PATH STATE
+// ============================================================================
+
+var map<int, float> rthBins = map.new<int, float>()
+var bool rthActive = false
+var int rthDayKey = na
+var int rthExpectedStart = na
+var int rthExpectedEndExclusive = na
+var int rthFirstTime = na
+var int rthLastTime = na
+var int rthSourceCount = 0
+var int rthRowCount = 0
+var int rthMissingFootprints = 0
+var int rthGapCount = 0
+var int rthMinBin = na
+var int rthMaxBin = na
+var float rthTotalVolume = 0.0
+var int rthSourceFingerprint = HASH_SEED
+var int rthPathFingerprint = HASH_SEED
+var bool rthSeenOpen = false
+var bool rthSeenClose = false
+var bool rthPrimitiveIssue = false
+var bool rthOverflow = false
+var bool rthReconciliationIssue = false
+var bool rthTimestampIssue = false
+var bool rthOhlcIssue = false
+
+var bool priorRthReady = false
+var bool priorRthComplete = false
+var int priorRthDayKey = na
+var int priorRthStart = na
+var int priorRthEndExclusive = na
+var int priorRthPocTicks = na
+var int priorRthVahTicks = na
+var int priorRthValTicks = na
+var float priorRthTotalVolume = na
+var float priorRthAchievedPercent = na
+var float priorRthPocVolume = na
+var int priorRthSourceCount = 0
+var int priorRthRowCount = 0
+var int priorRthGapCount = 0
+var int priorRthMissingFootprints = 0
+var int priorRthSourceFingerprint = na
+var int priorRthPathFingerprint = na
+var bool priorRthPrimitiveIssue = false
+var bool priorRthOverflow = false
+var bool priorRthReconciliationIssue = false
+var bool priorRthTimestampIssue = false
+var bool priorRthOhlcIssue = false
+
+var int latestRthCandidateDayKey = na
+var bool latestRthCandidateComplete = false
+var int latestRthCandidateMissing = 0
+var bool latestRthCandidatePrimitiveIssue = false
+var bool latestRthCandidateOverflow = false
+var bool latestRthCandidateReconciliationIssue = false
+var bool latestRthCandidateTimestampIssue = false
+var bool latestRthCandidateOhlcIssue = false
+var int discardedRthCandidates = 0
+
+var int pathFirstTime = na
+var int pathLastTime = na
+var int pathSourceCount = 0
+var int pathGapCount = 0
+var int pathMissingFootprints = 0
+var int pathFingerprint = HASH_SEED
+var bool pathPrimitiveIssue = false
+var bool pathReconciliationIssue = false
+var bool pathTimestampIssue = false
+var bool pathOhlcIssue = false
+
+var bool sourceArrayIssue = false
+var bool sourceOrderIssue = false
+var bool sourceTimestampIssue = false
+var int previousSourceTime = na
+var bool sawRelevantSourceMinute = false
+
+
+// ============================================================================
+// ORDERED, CONFIRMED ONE-MINUTE SOURCE PROCESSING
+// ============================================================================
+
+if requestSupported and barstate.isconfirmed
+    int timeCount = sourceTimes.size()
+    int closeTimeCount = sourceCloseTimes.size()
+    int footprintCount = sourceFootprints.size()
+    int rthFlagCount = sourceRthFlags.size()
+    int dayKeyCount = sourceDayKeys.size()
+    int openCount = sourceOpenTicks.size()
+    int highCount = sourceHighTicks.size()
+    int lowCount = sourceLowTicks.size()
+    int closeCount = sourceCloseTicks.size()
+    int alignedCount = sourceOhlcAlignedFlags.size()
+    bool lengthsMatch = timeCount == closeTimeCount and
+     timeCount == footprintCount and timeCount == rthFlagCount and
+     timeCount == dayKeyCount and timeCount == openCount and
+     timeCount == highCount and timeCount == lowCount and
+     timeCount == closeCount and timeCount == alignedCount
+    sourceArrayIssue := sourceArrayIssue or not lengthsMatch
+
+    int safeCount = math.min(
+         math.min(
+             math.min(timeCount, closeTimeCount),
+             math.min(footprintCount, rthFlagCount)),
+         math.min(
+             math.min(dayKeyCount, openCount),
+             math.min(
+                 math.min(highCount, lowCount),
+                 math.min(closeCount, alignedCount))))
+
+    if safeCount > 0
+        for sourceIndex = 0 to safeCount - 1
+            int sourceTime = sourceTimes.get(sourceIndex)
+            int sourceCloseTime = sourceCloseTimes.get(sourceIndex)
+            footprint sourceFootprint = sourceFootprints.get(sourceIndex)
+            bool sourceInRth = sourceRthFlags.get(sourceIndex)
+            int sourceDayKey = sourceDayKeys.get(sourceIndex)
+            int sourceOpen = sourceOpenTicks.get(sourceIndex)
+            int sourceHigh = sourceHighTicks.get(sourceIndex)
+            int sourceLow = sourceLowTicks.get(sourceIndex)
+            int sourceClose = sourceCloseTicks.get(sourceIndex)
+            bool sourceOhlcAligned = sourceOhlcAlignedFlags.get(sourceIndex)
+
+            bool timestampValid = not na(sourceTime) and
+                 not na(sourceCloseTime) and
+                 sourceTime % MINUTE_MS == 0 and
+                 sourceCloseTime == sourceTime + MINUTE_MS
+            bool sequenceValid = na(previousSourceTime) or
+                 sourceTime > previousSourceTime
+            sourceOrderIssue := sourceOrderIssue or not sequenceValid
+            sourceTimestampIssue :=
+                 sourceTimestampIssue or not timestampValid
+            previousSourceTime := sourceTime
+
+            bool sourceOhlcValid = sourceOhlcAligned and
+                 not na(sourceOpen) and not na(sourceHigh) and
+                 not na(sourceLow) and not na(sourceClose) and
+                 sourceHigh >= math.max(sourceOpen, sourceClose) and
+                 sourceLow <= math.min(sourceOpen, sourceClose) and
+                 sourceHigh >= sourceLow
+
+            int sourceHour = hour(sourceTime, RTH_TIMEZONE)
+            int sourceMinute = minute(sourceTime, RTH_TIMEZONE)
+            bool isRthOpenMinute = sourceInRth and
+                 sourceHour == 8 and sourceMinute == 30
+            bool isRthCloseMinute = sourceInRth and
+                 sourceHour == 15 and sourceMinute == 14
+            bool useForPath = sourceTime >= measurementStartInput and
+                 sourceTime < measurementEndInput
+
+            // A later source minute proves that an open candidate missed the
+            // exact scheduled close and therefore cannot be silently skipped.
+            if rthActive and sourceTime >= rthExpectedEndExclusive
+                latestRthCandidateDayKey := rthDayKey
+                latestRthCandidateComplete := false
+                latestRthCandidateMissing := rthMissingFootprints
+                latestRthCandidatePrimitiveIssue := rthPrimitiveIssue
+                latestRthCandidateOverflow := rthOverflow
+                latestRthCandidateReconciliationIssue :=
+                     rthReconciliationIssue
+                latestRthCandidateTimestampIssue := rthTimestampIssue
+                latestRthCandidateOhlcIssue := rthOhlcIssue
+                discardedRthCandidates += 1
+                rthActive := false
+
+            if sourceInRth and sourceTime < measurementStartInput and
+             (not rthActive or sourceDayKey != rthDayKey)
+                rthBins.clear()
+                rthActive := true
+                rthDayKey := sourceDayKey
+                rthExpectedStart := timestamp(
+                     RTH_TIMEZONE,
+                     year(sourceTime, RTH_TIMEZONE),
+                     month(sourceTime, RTH_TIMEZONE),
+                     dayofmonth(sourceTime, RTH_TIMEZONE),
+                     8,
+                     30)
+                rthExpectedEndExclusive :=
+                     rthExpectedStart + RTH_EXPECTED_MINUTES * MINUTE_MS
+                rthFirstTime := na
+                rthLastTime := na
+                rthSourceCount := 0
+                rthRowCount := 0
+                rthMissingFootprints := 0
+                rthGapCount := 0
+                rthMinBin := na
+                rthMaxBin := na
+                rthTotalVolume := 0.0
+                rthSourceFingerprint := HASH_SEED
+                rthPathFingerprint := HASH_SEED
+                rthSeenOpen := false
+                rthSeenClose := false
+                rthPrimitiveIssue := false
+                rthOverflow := false
+                rthReconciliationIssue := false
+                rthTimestampIssue := false
+                rthOhlcIssue := false
+
+            bool useForRth = sourceInRth and
+                 sourceTime < measurementStartInput and
+                 rthActive and sourceDayKey == rthDayKey
+
+            if useForRth
+                rthSeenOpen := rthSeenOpen or isRthOpenMinute
+                rthSeenClose := rthSeenClose or isRthCloseMinute
+                rthFirstTime := rthSourceCount == 0 ?
+                     sourceTime : rthFirstTime
+                if rthSourceCount > 0 and
+                 sourceTime != rthLastTime + MINUTE_MS
+                    rthGapCount += 1
+                rthLastTime := sourceTime
+                rthSourceCount += 1
+                rthTimestampIssue := rthTimestampIssue or
+                     not timestampValid or not sequenceValid
+                rthOhlcIssue := rthOhlcIssue or not sourceOhlcValid
+
+            if useForPath
+                sawRelevantSourceMinute := true
+                pathFirstTime := pathSourceCount == 0 ?
+                     sourceTime : pathFirstTime
+                if pathSourceCount > 0 and
+                 sourceTime != pathLastTime + MINUTE_MS
+                    pathGapCount += 1
+                pathLastTime := sourceTime
+                pathSourceCount += 1
+                pathTimestampIssue := pathTimestampIssue or
+                     not timestampValid or not sequenceValid
+                pathOhlcIssue := pathOhlcIssue or not sourceOhlcValid
+                int pathMinuteFp = pathMinuteFingerprint(
+                     sourceTime,
+                     sourceCloseTime,
+                     sourceOpen,
+                     sourceHigh,
+                     sourceLow,
+                     sourceClose)
+                pathFingerprint := hashFold(pathFingerprint, pathMinuteFp)
+
+            if useForRth or useForPath
+                sawRelevantSourceMinute := true
+                bool footprintAvailable = not na(sourceFootprint)
+                int minuteFingerprint = hashFold(HASH_SEED, sourceTime)
+                int minuteRowCount = 0
+                bool minutePrimitiveIssue = false
+                bool minuteReconciliationIssue = false
+
+                if footprintAvailable
+                    array<volume_row> rows = sourceFootprint.rows()
+                    minuteRowCount := rows.size()
+                    float footprintTotal = sourceFootprint.total_volume()
+                    float summedRowVolume = 0.0
+                    minuteFingerprint :=
+                         hashFold(minuteFingerprint, minuteRowCount)
+                    minuteFingerprint := hashFold(
+                         minuteFingerprint,
+                         volumeToFingerprintInt(footprintTotal))
+
+                    for row in rows
+                        float rowDown = row.down_price()
+                        float rowUp = row.up_price()
+                        float rowVolume = row.total_volume()
+                        int downTicks = priceToTicks(rowDown)
+                        int upTicks = priceToTicks(rowUp)
+                        int rowVolumeFingerprint =
+                             volumeToFingerprintInt(rowVolume)
+                        minuteFingerprint :=
+                             hashFold(minuteFingerprint, downTicks)
+                        minuteFingerprint :=
+                             hashFold(minuteFingerprint, upTicks)
+                        minuteFingerprint :=
+                             hashFold(
+                                 minuteFingerprint,
+                                 rowVolumeFingerprint)
+
+                        bool rowValuesValid = not na(rowDown) and
+                             not na(rowUp) and not na(rowVolume) and
+                             rowVolume >= 0.0
+                        float rowSpanTicks = rowValuesValid ?
+                             (rowUp - rowDown) / syminfo.mintick : na
+                        bool rowBoundsAligned = rowValuesValid and
+                             math.abs(
+                                 rowDown / syminfo.mintick -
+                                 downTicks) <= 0.000001 and
+                             math.abs(
+                                 rowUp / syminfo.mintick -
+                                 upTicks) <= 0.000001
+                        bool primitiveSpanValid = rowValuesValid and
+                             rowBoundsAligned and
+                             math.abs(
+                                 rowSpanTicks -
+                                 PRIMITIVE_TICKS) <= 0.000001
+                        minutePrimitiveIssue :=
+                             minutePrimitiveIssue or
+                             not primitiveSpanValid
+
+                        if rowValuesValid
+                            summedRowVolume += rowVolume
+                            if useForRth
+                                float rowMidpoint =
+                                     math.avg(rowDown, rowUp)
+                                int primitiveMidpointTick =
+                                     int(math.round(
+                                         rowMidpoint /
+                                         syminfo.mintick))
+                                int outputBin = int(math.floor(
+                                     (primitiveMidpointTick -
+                                      GRID_ORIGIN_TICKS) /
+                                     float(outputTicksInput)))
+                                [nextRthMin, nextRthMax,
+                                 rthPutOverflow] =
+                                     boundedPut(
+                                         rthBins,
+                                         outputBin,
+                                         rowVolume,
+                                         rthMinBin,
+                                         rthMaxBin)
+                                rthMinBin := nextRthMin
+                                rthMaxBin := nextRthMax
+                                rthOverflow :=
+                                     rthOverflow or rthPutOverflow
+                                rthTotalVolume += rowVolume
+
+                    float reconciliationTolerance = math.max(
+                         0.000001,
+                         math.abs(footprintTotal) * 0.000000001)
+                    minuteReconciliationIssue := na(footprintTotal) or
+                         math.abs(
+                             summedRowVolume -
+                             footprintTotal) > reconciliationTolerance
+                else
+                    minuteFingerprint :=
+                         hashFold(minuteFingerprint, HASH_NA)
+
+                if useForRth
+                    rthSourceFingerprint := hashFold(
+                         rthSourceFingerprint,
+                         minuteFingerprint)
+                    int rthPathMinuteFp = pathMinuteFingerprint(
+                         sourceTime,
+                         sourceCloseTime,
+                         sourceOpen,
+                         sourceHigh,
+                         sourceLow,
+                         sourceClose)
+                    rthPathFingerprint :=
+                         hashFold(rthPathFingerprint, rthPathMinuteFp)
+                    rthRowCount += minuteRowCount
+                    rthMissingFootprints +=
+                         footprintAvailable ? 0 : 1
+                    rthPrimitiveIssue := rthPrimitiveIssue or
+                         minutePrimitiveIssue
+                    rthReconciliationIssue :=
+                         rthReconciliationIssue or
+                         minuteReconciliationIssue
+
+                if useForPath
+                    pathMissingFootprints +=
+                         footprintAvailable ? 0 : 1
+                    pathPrimitiveIssue := pathPrimitiveIssue or
+                         minutePrimitiveIssue
+                    pathReconciliationIssue :=
+                         pathReconciliationIssue or
+                         minuteReconciliationIssue
+
+            if useForRth and isRthCloseMinute
+                bool rthBaseComplete = rthSeenOpen and rthSeenClose and
+                     rthFirstTime == rthExpectedStart and
+                     rthLastTime + MINUTE_MS ==
+                         rthExpectedEndExclusive and
+                     rthSourceCount == RTH_EXPECTED_MINUTES and
+                     rthGapCount == 0 and
+                     rthMissingFootprints == 0 and
+                     not rthPrimitiveIssue and not rthOverflow and
+                     not rthReconciliationIssue and
+                     not rthTimestampIssue and not rthOhlcIssue
+                [rthSnapshotComplete, rthPocTicks,
+                 rthVahTicks, rthValTicks,
+                 rthAchievedPercent, rthPocVolume] =
+                     freezeProfile(
+                         rthBins,
+                         rthMinBin,
+                         rthMaxBin,
+                         rthTotalVolume,
+                         rthBaseComplete)
+
+                latestRthCandidateDayKey := rthDayKey
+                latestRthCandidateComplete := rthSnapshotComplete
+                latestRthCandidateMissing :=
+                     rthMissingFootprints
+                latestRthCandidatePrimitiveIssue :=
+                     rthPrimitiveIssue
+                latestRthCandidateOverflow := rthOverflow
+                latestRthCandidateReconciliationIssue :=
+                     rthReconciliationIssue
+                latestRthCandidateTimestampIssue :=
+                     rthTimestampIssue
+                latestRthCandidateOhlcIssue := rthOhlcIssue
+
+                if rthSnapshotComplete
+                    priorRthReady := true
+                    priorRthComplete := true
+                    priorRthDayKey := rthDayKey
+                    priorRthStart := rthExpectedStart
+                    priorRthEndExclusive :=
+                         rthExpectedEndExclusive
+                    priorRthPocTicks := rthPocTicks
+                    priorRthVahTicks := rthVahTicks
+                    priorRthValTicks := rthValTicks
+                    priorRthTotalVolume := rthTotalVolume
+                    priorRthAchievedPercent :=
+                         rthAchievedPercent
+                    priorRthPocVolume := rthPocVolume
+                    priorRthSourceCount := rthSourceCount
+                    priorRthRowCount := rthRowCount
+                    priorRthGapCount := rthGapCount
+                    priorRthMissingFootprints :=
+                         rthMissingFootprints
+                    priorRthSourceFingerprint :=
+                         rthSourceFingerprint
+                    priorRthPathFingerprint :=
+                         rthPathFingerprint
+                    priorRthPrimitiveIssue :=
+                         rthPrimitiveIssue
+                    priorRthOverflow := rthOverflow
+                    priorRthReconciliationIssue :=
+                         rthReconciliationIssue
+                    priorRthTimestampIssue :=
+                         rthTimestampIssue
+                    priorRthOhlcIssue := rthOhlcIssue
+                else
+                    discardedRthCandidates += 1
+                rthActive := false
+
+
+// ============================================================================
+// TERMINAL RECONCILIATION AND STRUCTURED LOGS
+// ============================================================================
+
+var bool terminalEmitted = false
+var int terminalErrorMask = na
+var int terminalSequence = na
+var bool terminalProfileComplete = false
+var bool terminalPathComplete = false
+var int terminalChartBarTime = na
+
+bool terminalTrigger =
+     (barstate.islastconfirmedhistory or
+      (barstate.islast and barstate.isconfirmed)) and
+     time_close >= measurementEndInput
+
+if terminalTrigger and not terminalEmitted
+    if rthActive
+        latestRthCandidateDayKey := rthDayKey
+        latestRthCandidateComplete := false
+        latestRthCandidateMissing := rthMissingFootprints
+        latestRthCandidatePrimitiveIssue :=
+             rthPrimitiveIssue
+        latestRthCandidateOverflow := rthOverflow
+        latestRthCandidateReconciliationIssue :=
+             rthReconciliationIssue
+        latestRthCandidateTimestampIssue :=
+             rthTimestampIssue
+        latestRthCandidateOhlcIssue := rthOhlcIssue
+        discardedRthCandidates += 1
+        rthActive := false
+
+    bool rthTerminalComplete = priorRthReady and
+         priorRthComplete and latestRthCandidateComplete and
+         priorRthDayKey == latestRthCandidateDayKey
+    bool pathComplete = pathFirstTime == measurementStartInput and
+         pathLastTime + MINUTE_MS == measurementEndInput and
+         pathSourceCount == RTH_EXPECTED_MINUTES and
+         pathGapCount == 0 and pathMissingFootprints == 0 and
+         not pathPrimitiveIssue and
+         not pathReconciliationIssue and
+         not pathTimestampIssue and not pathOhlcIssue
+    bool anyRequiredFootprintUnavailable =
+         not sawRelevantSourceMinute or
+         latestRthCandidateMissing > 0 or
+         pathMissingFootprints > 0
+    bool anyPrimitiveIssue =
+         latestRthCandidatePrimitiveIssue or
+         pathPrimitiveIssue
+    bool anyOverflow = latestRthCandidateOverflow
+    bool anyReconciliationIssue =
+         latestRthCandidateReconciliationIssue or
+         pathReconciliationIssue
+    bool anyTimestampIssue =
+         latestRthCandidateTimestampIssue or
+         pathTimestampIssue or sourceOrderIssue or
+         sourceTimestampIssue
+    bool anyOhlcIssue =
+         latestRthCandidateOhlcIssue or pathOhlcIssue
+
+    int errorMask = 0
+    errorMask += environmentSupported ?
+         0 : ERR_UNSUPPORTED_ENVIRONMENT
+    errorMask += anyRequiredFootprintUnavailable ?
+         ERR_FOOTPRINT_UNAVAILABLE : 0
+    errorMask += rthTerminalComplete ?
+         0 : ERR_RTH_INCOMPLETE
+    errorMask += anyPrimitiveIssue ?
+         ERR_PRIMITIVE_ROW : 0
+    errorMask += anyOverflow ? ERR_BIN_CAP : 0
+    errorMask += anyReconciliationIssue ?
+         ERR_VOLUME_RECONCILIATION : 0
+    errorMask += configurationValid ?
+         0 : ERR_INVALID_CONFIG
+    errorMask += sourceArrayIssue ?
+         ERR_SOURCE_ARRAYS : 0
+    errorMask += anyTimestampIssue ?
+         ERR_SOURCE_SEQUENCE : 0
+    errorMask += anyOhlcIssue ?
+         ERR_SOURCE_OHLC : 0
+    errorMask += pathComplete ?
+         0 : ERR_PATH_INCOMPLETE
+
+    terminalErrorMask := errorMask
+    terminalProfileComplete := rthTerminalComplete
+    terminalPathComplete := pathComplete
+    terminalChartBarTime := time
+
+    int sequence = 0
+    sequence := emitInfo(
+         sequence,
+         "RUN_BEGIN",
+         "|logical_run_token=" +
+         str.tostring(logicalRunTokenInput) +
+         "|pine_settings_hash=" + pineSettingsHashInput +
+         "|script=" + SCRIPT_VERSION +
+         "|symbol=" + syminfo.tickerid +
+         "|expected_ticker=" + expectedTickerInput +
+         "|chart_timeframe=" + timeframe.period +
+         "|chart_standard=" + boolText(chart.is_standard) +
+         "|chart_session=" + syminfo.session +
+         "|environment_valid=" +
+         boolText(environmentSupported) +
+         "|configuration_valid=" +
+         boolText(configurationValid) +
+         "|source_timeframe=" + SOURCE_TIMEFRAME +
+         "|window_start_utc=" +
+         str.tostring(measurementStartInput) +
+         "|window_end_utc=" +
+         str.tostring(measurementEndInput))
+
+    // CONFIG keys are emitted in strict lexical order.
+    sequence := emitInfo(sequence, "CONFIG", "|key=expected_chart_session|value=" + EXPECTED_CHART_SESSION)
+    sequence := emitInfo(sequence, "CONFIG", "|key=expected_mintick|value=" + floatText(EXPECTED_MINTICK))
+    sequence := emitInfo(sequence, "CONFIG", "|key=expected_ticker|value=" + expectedTickerInput)
+    sequence := emitInfo(sequence, "CONFIG", "|key=grid_origin_ticks|value=" + str.tostring(GRID_ORIGIN_TICKS))
+    sequence := emitInfo(sequence, "CONFIG", "|key=max_profile_bins|value=" + str.tostring(MAX_PROFILE_BINS))
+    sequence := emitInfo(sequence, "CONFIG", "|key=measurement_end_ms|value=" + str.tostring(measurementEndInput))
+    sequence := emitInfo(sequence, "CONFIG", "|key=measurement_start_ms|value=" + str.tostring(measurementStartInput))
+    sequence := emitInfo(sequence, "CONFIG", "|key=output_ticks|value=" + str.tostring(outputTicksInput))
+    sequence := emitInfo(sequence, "CONFIG", "|key=path_fp_algo|value=" + PATH_FP_ALGORITHM)
+    sequence := emitInfo(sequence, "CONFIG", "|key=poc_algorithm|value=" + POC_ALGORITHM)
+    sequence := emitInfo(sequence, "CONFIG", "|key=primitive_ticks|value=" + str.tostring(PRIMITIVE_TICKS))
+    sequence := emitInfo(sequence, "CONFIG", "|key=prior_rth_selection|value=" + PRIOR_RTH_SELECTION)
+    sequence := emitInfo(sequence, "CONFIG", "|key=profile_fp_algo|value=" + FP_ALGORITHM)
+    sequence := emitInfo(sequence, "CONFIG", "|key=row_mapping_algorithm|value=" + ROW_MAPPING_ALGORITHM)
+    sequence := emitInfo(sequence, "CONFIG", "|key=rth_expected_minutes|value=" + str.tostring(RTH_EXPECTED_MINUTES))
+    sequence := emitInfo(sequence, "CONFIG", "|key=rth_session|value=" + RTH_SESSION)
+    sequence := emitInfo(sequence, "CONFIG", "|key=rth_timezone|value=" + RTH_TIMEZONE)
+    sequence := emitInfo(sequence, "CONFIG", "|key=source_timeframe|value=" + SOURCE_TIMEFRAME)
+    sequence := emitInfo(sequence, "CONFIG", "|key=value_area_algorithm|value=" + VA_ALGORITHM)
+    sequence := emitInfo(sequence, "CONFIG", "|key=value_area_percent|value=" + floatText(valueAreaPercentInput))
+    sequence := emitInfo(sequence, "CONFIG", "|key=volume_scale|value=" + str.tostring(VOLUME_SCALE))
+
+    string profileId = rthTerminalComplete ?
+         "RTH:" + str.tostring(priorRthDayKey) +
+         ":B" + str.tostring(outputTicksInput) :
+         "RTH:INVALID:B" + str.tostring(outputTicksInput)
+    string profileFields =
+         "|profile_id=" + profileId +
+         "|family=PRIOR_RTH" +
+         "|source_start_ms=" +
+         intText(rthTerminalComplete ? priorRthStart : na) +
+         "|source_end_ms=" +
+         intText(rthTerminalComplete ?
+             priorRthEndExclusive : na) +
+         "|poc_ticks=" +
+         intText(rthTerminalComplete ? priorRthPocTicks : na) +
+         "|vah_ticks=" +
+         intText(rthTerminalComplete ? priorRthVahTicks : na) +
+         "|val_ticks=" +
+         intText(rthTerminalComplete ? priorRthValTicks : na) +
+         "|complete=" + boolText(rthTerminalComplete) +
+         "|expected_source_count=" +
+         str.tostring(RTH_EXPECTED_MINUTES) +
+         "|source_count=" +
+         str.tostring(rthTerminalComplete ?
+             priorRthSourceCount : 0) +
+         "|row_count=" +
+         str.tostring(rthTerminalComplete ?
+             priorRthRowCount : 0) +
+         "|source_fp=" +
+         intText(rthTerminalComplete ?
+             priorRthSourceFingerprint : na) +
+         "|path_fp=" +
+         intText(rthTerminalComplete ?
+             priorRthPathFingerprint : na) +
+         "|gap_count=" +
+         str.tostring(rthTerminalComplete ?
+             priorRthGapCount : 0) +
+         "|missing_footprints=" +
+         str.tostring(latestRthCandidateMissing) +
+         "|primitive_issue=" +
+         boolText(latestRthCandidatePrimitiveIssue) +
+         "|bin_overflow=" +
+         boolText(latestRthCandidateOverflow) +
+         "|reconciliation_issue=" +
+         boolText(latestRthCandidateReconciliationIssue) +
+         "|timestamp_issue=" +
+         boolText(latestRthCandidateTimestampIssue) +
+         "|ohlc_issue=" +
+         boolText(latestRthCandidateOhlcIssue) +
+         "|total_volume=" +
+         floatText(rthTerminalComplete ?
+             priorRthTotalVolume : na) +
+         "|achieved_va_percent=" +
+         floatText(rthTerminalComplete ?
+             priorRthAchievedPercent : na) +
+         "|poc_volume=" +
+         floatText(rthTerminalComplete ?
+             priorRthPocVolume : na) +
+         "|discarded_candidates=" +
+         str.tostring(discardedRthCandidates)
+    sequence := rthTerminalComplete ?
+         emitInfo(sequence, "PROFILE", profileFields) :
+         emitWarning(sequence, "PROFILE", profileFields)
+
+    string pathFields =
+         "|first_ms=" + intText(pathFirstTime) +
+         "|last_ms=" + intText(pathLastTime) +
+         "|source_count=" + str.tostring(pathSourceCount) +
+         "|source_fp=" + str.tostring(pathFingerprint) +
+         "|gap_count=" + str.tostring(pathGapCount) +
+         "|missing_footprints=" +
+         str.tostring(pathMissingFootprints) +
+         "|primitive_issue=" + boolText(pathPrimitiveIssue) +
+         "|reconciliation_issue=" +
+         boolText(pathReconciliationIssue) +
+         "|timestamp_issue=" + boolText(pathTimestampIssue) +
+         "|ohlc_issue=" + boolText(pathOhlcIssue) +
+         "|complete=" + boolText(pathComplete)
+    sequence := pathComplete ?
+         emitInfo(sequence, "SOURCE_PATH", pathFields) :
+         emitWarning(sequence, "SOURCE_PATH", pathFields)
+
+    int warningCount = (rthTerminalComplete ? 0 : 1) +
+         (pathComplete ? 0 : 1)
+    int errorCount = errorMask == 0 ? 0 : 1
+    int terminalMaxSequence = sequence + 1
+    string terminalFields =
+         "|profiles=1" +
+         "|events=0" +
+         "|warnings=" + str.tostring(warningCount) +
+         "|errors=" + str.tostring(errorCount) +
+         "|max_seq=" + str.tostring(terminalMaxSequence) +
+         "|profile_fp_algo=" + FP_ALGORITHM +
+         "|path_fp_algo=" + PATH_FP_ALGORITHM +
+         "|profile_count=" +
+         str.tostring(rthTerminalComplete ?
+             priorRthSourceCount : 0) +
+         "|profile_fp=" +
+         intText(rthTerminalComplete ?
+             priorRthSourceFingerprint : na) +
+         "|path_count=" + str.tostring(pathSourceCount) +
+         "|path_fp=" + str.tostring(pathFingerprint) +
+         "|error_mask=" + str.tostring(errorMask)
+
+    if errorMask == 0
+        sequence := emitInfo(
+             sequence,
+             "RUN_END",
+             terminalFields)
+    else
+        sequence := emitError(
+             sequence,
+             "RUN_ABORT",
+             "|code=ERROR_MASK_" +
+             str.tostring(errorMask) +
+             terminalFields)
+
+    terminalSequence := sequence
+    terminalEmitted := true
+
+
+// ============================================================================
+// HIDDEN NUMERIC, CSV-EXPORTABLE RECONCILIATION OUTPUTS
+// ============================================================================
+
+bool terminalBar = terminalEmitted and
+     time == terminalChartBarTime
+bool measurementBar = time >= measurementStartInput and
+     time < measurementEndInput
+bool profileOutputValid = environmentSupported and
+     configurationValid and priorRthReady and priorRthComplete and
+     latestRthCandidateComplete and
+     priorRthDayKey == latestRthCandidateDayKey and
+     not sourceArrayIssue and not sourceOrderIssue and
+     not sourceTimestampIssue and
+     not latestRthCandidatePrimitiveIssue and
+     not latestRthCandidateOverflow and
+     not latestRthCandidateReconciliationIssue and
+     not latestRthCandidateTimestampIssue and
+     not latestRthCandidateOhlcIssue
+profileOutputValid := terminalBar ?
+     terminalErrorMask == 0 and terminalProfileComplete and
+     terminalPathComplete :
+     profileOutputValid
+
+plot(float(logicalRunTokenInput), "VP2.Run", display = display.data_window)
+plot(float(attemptTokenInput), "VP2.Attempt", display = display.data_window)
+plot(float(configTokenInput), "VP2.Config", display = display.data_window)
+plot(terminalBar ? 1.0 : 0.0, "VP2.Terminal", display = display.data_window)
+plot(profileOutputValid ? 1.0 : 0.0, "VP2.PriorRTH.Ready", display = display.data_window)
+plot(profileOutputValid ? 1.0 : 0.0, "VP2.PriorRTH.Complete", display = display.data_window)
+plot(profileOutputValid ? float(priorRthDayKey) : na, "VP2.PriorRTH.DayKey", display = display.data_window)
+plot(measurementBar and profileOutputValid ? float(priorRthPocTicks) : na, "VP2.PriorRTH.POC", display = display.data_window)
+plot(measurementBar and profileOutputValid ? float(priorRthVahTicks) : na, "VP2.PriorRTH.VAH", display = display.data_window)
+plot(measurementBar and profileOutputValid ? float(priorRthValTicks) : na, "VP2.PriorRTH.VAL", display = display.data_window)
+plot(profileOutputValid ? float(priorRthStart) : na, "VP2.PriorRTH.SourceStart", display = display.data_window)
+plot(profileOutputValid ? float(priorRthEndExclusive) : na, "VP2.PriorRTH.SourceEnd", display = display.data_window)
+plot(profileOutputValid ? float(priorRthSourceCount) : na, "VP2.PriorRTH.SourceCount", display = display.data_window)
+plot(profileOutputValid ? float(priorRthRowCount) : na, "VP2.PriorRTH.RowCount", display = display.data_window)
+plot(profileOutputValid ? float(priorRthSourceFingerprint) : na, "VP2.PriorRTH.SourceFP", display = display.data_window)
+plot(profileOutputValid ? float(priorRthPathFingerprint) : na, "VP2.PriorRTH.PathFP", display = display.data_window)
+plot(profileOutputValid ? priorRthTotalVolume : na, "VP2.PriorRTH.TotalVolume", display = display.data_window)
+plot(profileOutputValid ? priorRthAchievedPercent : na, "VP2.PriorRTH.AchievedVA", display = display.data_window)
+plot(profileOutputValid ? priorRthPocVolume : na, "VP2.PriorRTH.POCVolume", display = display.data_window)
+plot(terminalBar ? float(pathSourceCount) : na, "VP2.Path.SourceCount", display = display.data_window)
+plot(terminalBar ? float(pathFingerprint) : na, "VP2.Path.SourceFP", display = display.data_window)
+plot(terminalBar ? float(pathFirstTime) : na, "VP2.Path.First", display = display.data_window)
+plot(terminalBar ? float(pathLastTime) : na, "VP2.Path.Last", display = display.data_window)
+plot(terminalBar ? float(pathGapCount) : na, "VP2.Path.GapCount", display = display.data_window)
+plot(terminalBar ? float(terminalErrorMask) : 0.0, "VP2.ErrorMask", display = display.data_window)
+plot(terminalBar ? float(terminalSequence) : na, "VP2.MaxSeq", display = display.data_window)

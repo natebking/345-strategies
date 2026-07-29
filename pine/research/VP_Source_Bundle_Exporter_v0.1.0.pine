@@ -1,0 +1,99 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// at https://mozilla.org/MPL/2.0/
+// © 2026 TheStratSuite contributors
+//@version=6
+
+// Headless OHLCV export aid for the frozen Volume Profile source bundle.
+// This script performs no profile calculation and draws no chart objects.
+indicator(
+     "VP Source Bundle Exporter v0.1.0",
+     shorttitle = "VP Source Export",
+     overlay = true)
+
+const string SCRIPT_VERSION = "0.1.0"
+const float EXPECTED_MINTICK = 0.25
+const int ERR_ENVIRONMENT = 1
+const int ERR_OHLC_TICK_ALIGNMENT = 2
+const int ERR_OHLC_SHAPE = 4
+const int ERR_VOLUME = 8
+const int ERR_IDENTITY = 16
+
+string identityGroup = "Frozen source-bundle identity"
+string bundleIdInput = input.string(
+     "VP0-30-ES-v1-source",
+     "Bundle ID",
+     group = identityGroup)
+int bundleTokenInput = input.int(
+     1,
+     "Bundle token",
+     minval = 1,
+     maxval = 2147483647,
+     group = identityGroup)
+string expectedTickerInput = input.string(
+     "ESM2026",
+     "Exact actual-month ticker",
+     group = identityGroup)
+
+safeIdentity(string value) =>
+    str.length(value) > 0 and
+     not str.contains(value, "|")
+
+tickAligned(float value) =>
+    not na(value) and
+     math.abs(value / syminfo.mintick -
+         math.round(value / syminfo.mintick)) <= 0.000001
+
+bool actualContract = syminfo.type == "futures" and
+     (syminfo.root == "ES" or syminfo.root == "MES") and
+     not str.contains(syminfo.ticker, "!") and
+     syminfo.ticker == expectedTickerInput
+bool environmentValid = chart.is_standard and
+     actualContract and
+     math.abs(syminfo.mintick - EXPECTED_MINTICK) <= 0.000000001
+bool identityValid = safeIdentity(bundleIdInput) and
+     safeIdentity(expectedTickerInput) and
+     bundleTokenInput > 0
+bool ohlcTickAligned = tickAligned(open) and tickAligned(high) and
+     tickAligned(low) and tickAligned(close)
+bool ohlcShapeValid = not na(open) and not na(high) and
+     not na(low) and not na(close) and
+     high >= math.max(open, close) and
+     low <= math.min(open, close) and
+     high >= low
+bool volumeValid = not na(volume) and volume >= 0.0
+
+int errorMask =
+     (environmentValid ? 0 : ERR_ENVIRONMENT) +
+     (ohlcTickAligned ? 0 : ERR_OHLC_TICK_ALIGNMENT) +
+     (ohlcShapeValid ? 0 : ERR_OHLC_SHAPE) +
+     (volumeValid ? 0 : ERR_VOLUME) +
+     (identityValid ? 0 : ERR_IDENTITY)
+bool exportValid = errorMask == 0
+
+if barstate.islastconfirmedhistory
+    string kind = exportValid ? "RUN_END" : "RUN_ABORT"
+    string severity = exportValid ? "INFO" : "ERROR"
+    string terminalRecord =
+         "VPB|schema=1" +
+         "|kind=" + kind +
+         "|severity=" + severity +
+         "|bundle_id=" + bundleIdInput +
+         "|bundle_token=" + str.tostring(bundleTokenInput) +
+         "|script=" + SCRIPT_VERSION +
+         "|symbol=" + syminfo.tickerid +
+         "|ticker=" + syminfo.ticker +
+         "|chart_timeframe=" + timeframe.period +
+         "|chart_standard=" + (chart.is_standard ? "1" : "0") +
+         "|chart_session=" + syminfo.session +
+         "|mintick=" + str.tostring(syminfo.mintick) +
+         "|error_mask=" + str.tostring(errorMask)
+    if exportValid
+        log.info(terminalRecord)
+    else
+        log.error(terminalRecord)
+
+// Every output is Data Window-only. The chart itself remains uncluttered.
+plot(float(bundleTokenInput), "VPB.BundleToken", display = display.data_window)
+plot(exportValid ? volume : na, "VPB.Volume", display = display.data_window)
+plot(exportValid ? 1.0 : 0.0, "VPB.Valid", display = display.data_window)
+plot(float(errorMask), "VPB.ErrorMask", display = display.data_window)

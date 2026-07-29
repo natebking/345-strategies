@@ -1,0 +1,21 @@
+{
+  "schema": "vpx.ui-readback/1",
+  "example_only": true,
+  "logical_run_id": "vp0-grid-1-esu2026-20260724-5m-r4-va70",
+  "attempt_id": "a01-20260725T140000Z",
+  "attempt_token": 701240501,
+  "chart_state": {
+    "adjustment": "none",
+    "calculation_timeframe": "1",
+    "chart_timeframe": "5",
+    "chart_type": "standard",
+    "contract": "ESU2026",
+    "display_timezone": "America/Chicago",
+    "locale": "en-US",
+    "session_mode": "eth",
+    "session_ui_label": "Electronic trading hours",
+    "symbol": "CME_MINI:ESU2026"
+  },
+  "chart_state_hash": "79943ab0a07e245947ae956c199fffe3d40bdc2d0e3cdb600a91e2920b94dad0",
+  "readback_utc": "2026-07-25T14:00:15Z"
+}

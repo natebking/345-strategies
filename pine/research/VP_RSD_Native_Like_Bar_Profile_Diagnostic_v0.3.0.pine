@@ -1,0 +1,991 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// at https://mozilla.org/MPL/2.0/
+// © 2026 TheStratSuite contributors
+//@version=6
+
+// RESEARCH DIAGNOSTIC ONLY.
+//
+// This variant approximates TradingView's native Fixed Range Volume Profile
+// from lower-timeframe OHLCV bars. It uses an immutable RSD-derived 15-minute
+// input range, a selectable fixed source timeframe, and exact high/low overlap
+// when allocating each source bar's total volume to fixed output rows.
+//
+// Endpoint contract:
+//   [Start 15m bar time, End 15m bar time + 15 minutes)
+//
+// Source timeframes are deliberately explicit because the native tool can step
+// up its internal timeframe for long ranges. This script does not claim parity;
+// it exists to compare 1m/3m/5m/15m reconstructions with the native drawing.
+//
+// The scorer is discovery instrumentation. It displays multiple clean log-jump
+// boundaries and does not create entries, exits, support/resistance claims, or
+// production visibility decisions.
+indicator(
+     "VP RSD Native-Like Bar Profile Diagnostic v0.3.0",
+     shorttitle = "VP RSD BAR 0.3",
+     overlay = true,
+     max_bars_back = 5000,
+     max_lines_count = 500,
+     max_boxes_count = 10,
+     max_labels_count = 100)
+
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+string rangeGroup = "1. Immutable RSD range (15m chart time)"
+int profileStartInput = input.time(
+     timestamp("23 Jun 2026 12:45 -0700"),
+     "Start swing bar",
+     group = rangeGroup)
+int profileEndBarInput = input.time(
+     timestamp("14 Jul 2026 06:30 -0700"),
+     "End swing bar (included)",
+     group = rangeGroup)
+
+string constructionGroup = "2. Native-like bar construction"
+string sourceTimeframeInput = input.string(
+     "3",
+     "Source timeframe",
+     options = ["1", "3", "5", "15"],
+     group = constructionGroup,
+     tooltip = "Default 3m is the leading comparison for the 5,100-bar XLE range. Run 1m, 3m, 5m, and 15m as separate comparisons.")
+int outputTicksInput = input.int(
+     10,
+     "Ticks per row",
+     minval = 1,
+     maxval = 500,
+     group = constructionGroup,
+     tooltip = "Match native FRVP: 25 for current SPY/DIA/NVDA examples; 10 for XLE.")
+float valueAreaPercentInput = input.float(
+     70.0,
+     "Value Area target (%)",
+     minval = 1.0,
+     maxval = 100.0,
+     step = 0.5,
+     group = constructionGroup)
+
+string scoringGroup = "3. Raw shelf scorer"
+int shelfCountInput = input.int(
+     8,
+     "Selected shelf candidates",
+     minval = 1,
+     maxval = 12,
+     group = scoringGroup)
+bool applyDiscoveryGatesInput = input.bool(
+     false,
+     "Apply provisional discovery gates",
+     group = scoringGroup)
+float minimumRatioInput = input.float(
+     1.75,
+     "Gate: minimum ratio",
+     minval = 1.0,
+     step = 0.05,
+     group = scoringGroup)
+float maximumNoiseFractionInput = input.float(
+     0.50,
+     "Gate: max W / J",
+     minval = 0.0,
+     step = 0.05,
+     group = scoringGroup)
+float minimumDenseFractionInput = input.float(
+     0.20,
+     "Gate: dense side / max row",
+     minval = 0.0,
+     maxval = 1.0,
+     step = 0.05,
+     group = scoringGroup)
+float minimumRobustZInput = input.float(
+     2.50,
+     "Gate: minimum robust z",
+     minval = 0.0,
+     step = 0.25,
+     group = scoringGroup)
+int clusterRowsInput = input.int(
+     2,
+     "Cluster radius (rows)",
+     minval = 0,
+     maxval = 10,
+     group = scoringGroup)
+bool extendShelvesInput = input.bool(
+     true,
+     "Extend selected shelves to current bar",
+     group = scoringGroup)
+
+string displayGroup = "4. Display"
+float histogramWidthInput = input.float(
+     24.0,
+     "Histogram width (% of range)",
+     minval = 5.0,
+     maxval = 50.0,
+     group = displayGroup)
+color rangeColorInput = input.color(
+     #26c6da,
+     "Range / histogram",
+     group = displayGroup)
+color shelfColorInput = input.color(
+     #ffd54f,
+     "Shelf candidates",
+     group = displayGroup)
+
+
+// ============================================================================
+// CONSTANTS AND HELPERS
+// ============================================================================
+
+const int MINUTE_MS = 60000
+const int PROFILE_BAR_MS = 15 * MINUTE_MS
+const int GRID_ORIGIN_TICKS = 0
+const int MAX_PROFILE_BINS = 400
+const int SHELF_SIDE_ROWS = 3
+const int MAX_RANKED_DIAGNOSTICS = 60
+
+int profileEndExclusive = profileEndBarInput + PROFILE_BAR_MS
+int sourceBarMs = int(
+     timeframe.in_seconds(sourceTimeframeInput) * 1000)
+
+priceToTicks(float price) =>
+    na(price) ? na : int(math.round(price / syminfo.mintick))
+
+binVolume(map<int, float> bins, int bin) =>
+    bins.contains(bin) ? bins.get(bin) : 0.0
+
+median3(float a, float b, float c) =>
+    a + b + c -
+     math.min(a, math.min(b, c)) -
+     math.max(a, math.max(b, c))
+
+mad3(float a, float b, float c, float center) =>
+    median3(
+         math.abs(a - center),
+         math.abs(b - center),
+         math.abs(c - center))
+
+medianSorted(array<float> values) =>
+    int count = values.size()
+    float result = na
+    if count > 0
+        int middle = int(math.floor(count / 2.0))
+        result := count % 2 == 1 ?
+             values.get(middle) :
+             math.avg(values.get(middle - 1), values.get(middle))
+    result
+
+appendReason(string existing, string addition) =>
+    existing == "" ? addition : existing + "+" + addition
+
+timeText(int value) =>
+    na(value) ? "NA" :
+     str.format_time(value, "yyyy-MM-dd HH:mm", syminfo.timezone)
+
+floatText(float value) =>
+    na(value) ? "NA" : str.tostring(value, "#.########")
+
+clearLines(array<line> drawings) =>
+    int count = drawings.size()
+    if count > 0
+        for index = 0 to count - 1
+            line.delete(drawings.get(index))
+    drawings.clear()
+
+clearLabels(array<label> drawings) =>
+    int count = drawings.size()
+    if count > 0
+        for index = 0 to count - 1
+            label.delete(drawings.get(index))
+    drawings.clear()
+
+diagnosticRow(
+     table target,
+     int row,
+     string key,
+     string value,
+     color background) =>
+    table.cell(
+         target, 0, row, key,
+         text_color = color.silver,
+         text_size = size.tiny,
+         bgcolor = background,
+         text_halign = text.align_left)
+    table.cell(
+         target, 1, row, value,
+         text_color = color.white,
+         text_size = size.tiny,
+         bgcolor = background,
+         text_halign = text.align_left)
+
+boundedPut(
+     map<int, float> bins,
+     int key,
+     float addedVolume,
+     int currentMin,
+     int currentMax) =>
+    bool alreadyPresent = bins.contains(key)
+    int candidateMin = na(currentMin) ? key : math.min(currentMin, key)
+    int candidateMax = na(currentMax) ? key : math.max(currentMax, key)
+    bool overflow = candidateMax - candidateMin + 1 >
+         MAX_PROFILE_BINS or
+         (not alreadyPresent and bins.size() >= MAX_PROFILE_BINS)
+    int nextMin = currentMin
+    int nextMax = currentMax
+    if not overflow
+        bins.put(key, binVolume(bins, key) + addedVolume)
+        nextMin := candidateMin
+        nextMax := candidateMax
+    [nextMin, nextMax, overflow]
+
+
+// ============================================================================
+// FIXED LOWER-TIMEFRAME BAR REQUEST
+// ============================================================================
+
+sourcePayload() =>
+    [time, priceToTicks(high), priceToTicks(low), volume]
+
+[sourceTimes,
+ sourceHighTicks,
+ sourceLowTicks,
+ sourceVolumes] = request.security_lower_tf(
+     syminfo.tickerid,
+     sourceTimeframeInput,
+     sourcePayload(),
+     ignore_invalid_timeframe = true)
+
+bool chartSupported = chart.is_standard and
+     timeframe.isminutes and
+     timeframe.in_seconds() == 15 * 60 and
+     timeframe.in_seconds(sourceTimeframeInput) <= 15 * 60
+bool inputWindowValid = profileStartInput < profileEndBarInput and
+     profileStartInput % MINUTE_MS == 0 and
+     profileEndBarInput % MINUTE_MS == 0
+
+var map<int, float> profileBins = map.new<int, float>()
+var int profileMinBin = na
+var int profileMaxBin = na
+var float sourceTotalVolume = 0.0
+var float allocatedTotalVolume = 0.0
+var int includedSourceBars = 0
+var int firstIncludedSourceTime = na
+var int lastIncludedSourceTime = na
+var int previousIncludedSourceTime = na
+var int invalidSourceBars = 0
+var bool sourceArrayIssue = false
+var bool sourceOrderIssue = false
+var bool profileOverflow = false
+
+if chartSupported and inputWindowValid and barstate.isconfirmed
+    int timeCount = sourceTimes.size()
+    int highCount = sourceHighTicks.size()
+    int lowCount = sourceLowTicks.size()
+    int volumeCount = sourceVolumes.size()
+    bool lengthsMatch = timeCount == highCount and
+         timeCount == lowCount and
+         timeCount == volumeCount
+    sourceArrayIssue := sourceArrayIssue or not lengthsMatch
+    int safeCount = math.min(
+         math.min(timeCount, highCount),
+         math.min(lowCount, volumeCount))
+
+    if safeCount > 0
+        for sourceIndex = 0 to safeCount - 1
+            int sourceTime = sourceTimes.get(sourceIndex)
+            int sourceHigh = sourceHighTicks.get(sourceIndex)
+            int sourceLow = sourceLowTicks.get(sourceIndex)
+            float sourceVolume = sourceVolumes.get(sourceIndex)
+            bool useForProfile = not na(sourceTime) and
+                 sourceTime >= profileStartInput and
+                 sourceTime < profileEndExclusive
+
+            if useForProfile
+                firstIncludedSourceTime :=
+                     includedSourceBars == 0 ?
+                     sourceTime : firstIncludedSourceTime
+                sourceOrderIssue := sourceOrderIssue or
+                     (not na(previousIncludedSourceTime) and
+                      sourceTime <= previousIncludedSourceTime)
+                previousIncludedSourceTime := sourceTime
+                lastIncludedSourceTime := sourceTime
+                includedSourceBars += 1
+
+                bool sourceValid = not na(sourceHigh) and
+                     not na(sourceLow) and
+                     not na(sourceVolume) and
+                     sourceVolume >= 0.0 and
+                     sourceHigh >= sourceLow
+                invalidSourceBars += sourceValid ? 0 : 1
+
+                if sourceValid
+                    sourceTotalVolume += sourceVolume
+                    int sourceLowBin = int(math.floor(
+                         (sourceLow - GRID_ORIGIN_TICKS) /
+                         float(outputTicksInput)))
+                    int sourceHighBin = int(math.floor(
+                         (sourceHigh - GRID_ORIGIN_TICKS) /
+                         float(outputTicksInput)))
+                    int sourceTickCount =
+                         sourceHigh - sourceLow + 1
+
+                    // A flat bar has one traded tick and therefore gives all
+                    // volume to its containing output row. Wider bars allocate
+                    // volume by the exact count of overlapping tick prices.
+                    for outputBin = sourceLowBin to sourceHighBin
+                        int binLowTick =
+                             GRID_ORIGIN_TICKS +
+                             outputBin * outputTicksInput
+                        int binHighTick =
+                             binLowTick + outputTicksInput - 1
+                        int overlapLow =
+                             math.max(sourceLow, binLowTick)
+                        int overlapHigh =
+                             math.min(sourceHigh, binHighTick)
+                        int overlapTicks = math.max(
+                             0, overlapHigh - overlapLow + 1)
+                        float allocatedVolume =
+                             sourceVolume *
+                             overlapTicks /
+                             sourceTickCount
+                        if overlapTicks > 0
+                            [nextMin, nextMax, putOverflow] =
+                                 boundedPut(
+                                     profileBins,
+                                     outputBin,
+                                     allocatedVolume,
+                                     profileMinBin,
+                                     profileMaxBin)
+                            profileMinBin := nextMin
+                            profileMaxBin := nextMax
+                            profileOverflow :=
+                                 profileOverflow or putOverflow
+                            allocatedTotalVolume += allocatedVolume
+
+
+// ============================================================================
+// POC / CONTIGUOUS VALUE AREA
+// ============================================================================
+
+calculateProfile(
+     map<int, float> bins,
+     int minBin,
+     int maxBin,
+     float totalVolume) =>
+    bool valid = not na(minBin) and not na(maxBin) and
+         maxBin >= minBin and
+         maxBin - minBin + 1 <= MAX_PROFILE_BINS and
+         bins.size() > 0 and totalVolume > 0.0
+    int pocBin = na
+    int valueAreaLowBin = na
+    int valueAreaHighBin = na
+    float achievedPercent = na
+    float maximumVolume = na
+
+    if valid
+        float weightedCenter2 = 0.0
+        for bin = minBin to maxBin
+            float volumeAtBin = binVolume(bins, bin)
+            int center2 = 2 * (
+                 GRID_ORIGIN_TICKS + bin * outputTicksInput) +
+                 outputTicksInput
+            weightedCenter2 += volumeAtBin * center2
+            maximumVolume := na(maximumVolume) ?
+                 volumeAtBin :
+                 math.max(maximumVolume, volumeAtBin)
+
+        float meanCenter2 = weightedCenter2 / totalVolume
+        float bestDistance = na
+        float tieTolerance = math.max(
+             0.000000001,
+             math.abs(maximumVolume) * 0.000000000001)
+        for bin = minBin to maxBin
+            float volumeAtBin = binVolume(bins, bin)
+            if math.abs(volumeAtBin - maximumVolume) <= tieTolerance
+                int center2 = 2 * (
+                     GRID_ORIGIN_TICKS + bin * outputTicksInput) +
+                     outputTicksInput
+                float distance = math.abs(center2 - meanCenter2)
+                if na(bestDistance) or
+                 distance < bestDistance - 0.000000001 or
+                 (math.abs(distance - bestDistance) <=
+                  0.000000001 and bin < pocBin)
+                    pocBin := bin
+                    bestDistance := distance
+
+        if not na(pocBin)
+            valueAreaLowBin := pocBin
+            valueAreaHighBin := pocBin
+            float includedVolume = binVolume(bins, pocBin)
+            float targetVolume =
+                 totalVolume * valueAreaPercentInput / 100.0
+            float tolerance = math.max(
+                 0.000000001,
+                 math.abs(totalVolume) * 0.000000000001)
+            int steps = 0
+            while includedVolume < targetVolume - tolerance and
+             steps < MAX_PROFILE_BINS
+                bool hasLower = valueAreaLowBin > minBin
+                bool hasUpper = valueAreaHighBin < maxBin
+                if not hasLower and not hasUpper
+                    break
+                int lowerCandidate = valueAreaLowBin - 1
+                int upperCandidate = valueAreaHighBin + 1
+                float lowerVolume = hasLower ?
+                     binVolume(bins, lowerCandidate) : na
+                float upperVolume = hasUpper ?
+                     binVolume(bins, upperCandidate) : na
+                bool chooseUpper = not hasLower
+                if hasLower and hasUpper
+                    chooseUpper :=
+                         upperVolume > lowerVolume or
+                         (upperVolume == lowerVolume and
+                          math.abs(upperCandidate - pocBin) <=
+                          math.abs(lowerCandidate - pocBin))
+                float selectedVolume =
+                     chooseUpper ? upperVolume : lowerVolume
+                if includedVolume + selectedVolume >
+                 targetVolume + tolerance
+                    break
+                if chooseUpper
+                    valueAreaHighBin := upperCandidate
+                else
+                    valueAreaLowBin := lowerCandidate
+                includedVolume += selectedVolume
+                steps += 1
+            achievedPercent :=
+                 includedVolume / totalVolume * 100.0
+
+    [valid and not na(pocBin),
+     pocBin,
+     valueAreaLowBin,
+     valueAreaHighBin,
+     achievedPercent,
+     maximumVolume]
+
+
+// ============================================================================
+// DRAWING STATE
+// ============================================================================
+
+var box rangeBox = na
+var line pocLine = na
+var line valueAreaHighLine = na
+var line valueAreaLowLine = na
+var array<line> histogramLines = array.new_line()
+var array<line> shelfLines = array.new_line()
+var array<label> shelfLabels = array.new_label()
+var table diagnosticTable = table.new(
+     position.top_right,
+     2,
+     20,
+     frame_color = color.new(color.gray, 35),
+     frame_width = 1,
+     border_color = color.new(color.gray, 70),
+     border_width = 1)
+
+
+// ============================================================================
+// LAST-BAR PROFILE, SCORER, AND VISUALS
+// ============================================================================
+
+if barstate.islast
+    if not na(rangeBox)
+        box.delete(rangeBox)
+        rangeBox := na
+    if not na(pocLine)
+        line.delete(pocLine)
+        pocLine := na
+    if not na(valueAreaHighLine)
+        line.delete(valueAreaHighLine)
+        valueAreaHighLine := na
+    if not na(valueAreaLowLine)
+        line.delete(valueAreaLowLine)
+        valueAreaLowLine := na
+    clearLines(histogramLines)
+    clearLines(shelfLines)
+    clearLabels(shelfLabels)
+
+    float outlineHigh = na
+    float outlineLow = na
+    int scanBars = math.min(bar_index, 4999)
+    for offset = 0 to scanBars
+        if time[offset] >= profileStartInput and
+         time[offset] < profileEndExclusive
+            outlineHigh := na(outlineHigh) ?
+                 high[offset] : math.max(outlineHigh, high[offset])
+            outlineLow := na(outlineLow) ?
+                 low[offset] : math.min(outlineLow, low[offset])
+    if inputWindowValid and not na(outlineHigh)
+        rangeBox := box.new(
+             left = profileStartInput,
+             top = outlineHigh,
+             right = profileEndExclusive,
+             bottom = outlineLow,
+             xloc = xloc.bar_time,
+             border_color = rangeColorInput,
+             border_width = 2,
+             border_style = line.style_dashed,
+             bgcolor = color.new(rangeColorInput, 97))
+
+    bool endpointsComplete =
+         firstIncludedSourceTime == profileStartInput and
+         lastIncludedSourceTime + sourceBarMs ==
+         profileEndExclusive
+    float reconciliationTolerance = math.max(
+         0.000001,
+         math.abs(sourceTotalVolume) * 0.000000001)
+    bool reconciliationValid =
+         math.abs(
+             allocatedTotalVolume -
+             sourceTotalVolume) <=
+         reconciliationTolerance
+    bool baseComplete = chartSupported and
+         inputWindowValid and
+         time >= profileEndExclusive and
+         endpointsComplete and
+         includedSourceBars > 0 and
+         invalidSourceBars == 0 and
+         not sourceArrayIssue and
+         not sourceOrderIssue and
+         not profileOverflow and
+         reconciliationValid
+
+    [algorithmValid,
+     pocBin,
+     valueAreaLowBin,
+     valueAreaHighBin,
+     achievedValueAreaPercent,
+     maximumBinVolume] = calculateProfile(
+         profileBins,
+         profileMinBin,
+         profileMaxBin,
+         allocatedTotalVolume)
+    bool profileValid = baseComplete and algorithmValid
+
+    float pocPrice = profileValid ?
+         (GRID_ORIGIN_TICKS + pocBin * outputTicksInput +
+          outputTicksInput * 0.5) * syminfo.mintick : na
+    float valueAreaLowPrice = profileValid ?
+         (GRID_ORIGIN_TICKS +
+          valueAreaLowBin * outputTicksInput) *
+          syminfo.mintick : na
+    float valueAreaHighPrice = profileValid ?
+         (GRID_ORIGIN_TICKS +
+          (valueAreaHighBin + 1) * outputTicksInput) *
+          syminfo.mintick : na
+
+    // Robust clean log-jump scorer: three rows below and above each boundary.
+    array<int> rawBins = array.new_int()
+    array<float> rawJumps = array.new_float()
+    array<float> rawNoise = array.new_float()
+    array<float> rawClean = array.new_float()
+    array<float> rawRatios = array.new_float()
+    array<float> rawDenseVolumes = array.new_float()
+    array<int> rawDenseSigns = array.new_int()
+    array<float> rawZ = array.new_float()
+    array<float> positiveVolumes = array.new_float()
+    float logEpsilon = na
+    float cleanMedian = na
+    float cleanMad = na
+
+    if profileValid
+        for bin = profileMinBin to profileMaxBin
+            float volumeAtBin = binVolume(profileBins, bin)
+            if volumeAtBin > 0.0
+                positiveVolumes.push(volumeAtBin)
+        positiveVolumes.sort(order.ascending)
+        logEpsilon := math.max(
+             medianSorted(positiveVolumes) * 0.01,
+             0.000000001)
+
+        int firstBoundary =
+             profileMinBin + SHELF_SIDE_ROWS
+        int lastBoundary =
+             profileMaxBin - SHELF_SIDE_ROWS + 1
+        if firstBoundary <= lastBoundary
+            for boundary = firstBoundary to lastBoundary
+                float l0 = math.log(
+                     binVolume(profileBins, boundary - 3) +
+                     logEpsilon)
+                float l1 = math.log(
+                     binVolume(profileBins, boundary - 2) +
+                     logEpsilon)
+                float l2 = math.log(
+                     binVolume(profileBins, boundary - 1) +
+                     logEpsilon)
+                float r0 = math.log(
+                     binVolume(profileBins, boundary) +
+                     logEpsilon)
+                float r1 = math.log(
+                     binVolume(profileBins, boundary + 1) +
+                     logEpsilon)
+                float r2 = math.log(
+                     binVolume(profileBins, boundary + 2) +
+                     logEpsilon)
+                float leftMedian = median3(l0, l1, l2)
+                float rightMedian = median3(r0, r1, r2)
+                float jump =
+                     math.abs(rightMedian - leftMedian)
+                float noise =
+                     mad3(l0, l1, l2, leftMedian) +
+                     mad3(r0, r1, r2, rightMedian)
+                float cleanJump =
+                     math.max(0.0, jump - noise)
+                float denseVolume = math.max(
+                     0.0,
+                     math.exp(
+                         math.max(leftMedian, rightMedian)) -
+                     logEpsilon)
+                rawBins.push(boundary)
+                rawJumps.push(jump)
+                rawNoise.push(noise)
+                rawClean.push(cleanJump)
+                rawRatios.push(math.exp(jump))
+                rawDenseVolumes.push(denseVolume)
+                rawDenseSigns.push(
+                     rightMedian > leftMedian ? 1 :
+                     rightMedian < leftMedian ? -1 : 0)
+
+        if rawClean.size() > 0
+            array<float> cleanSorted = rawClean.copy()
+            cleanSorted.sort(order.ascending)
+            cleanMedian := medianSorted(cleanSorted)
+            array<float> deviations = array.new_float()
+            for index = 0 to rawClean.size() - 1
+                deviations.push(
+                     math.abs(
+                         rawClean.get(index) -
+                         cleanMedian))
+            deviations.sort(order.ascending)
+            cleanMad := medianSorted(deviations)
+            float robustScale = math.max(
+                 1.4826 * cleanMad,
+                 0.000000001)
+            for index = 0 to rawClean.size() - 1
+                rawZ.push(
+                     (rawClean.get(index) -
+                      cleanMedian) /
+                     robustScale)
+
+    array<int> rankedIndices = array.new_int()
+    array<bool> consumed =
+         array.new_bool(rawClean.size(), false)
+    int rankLimit = math.min(
+         rawClean.size(),
+         MAX_RANKED_DIAGNOSTICS)
+    if rankLimit > 0
+        for rank = 0 to rankLimit - 1
+            int bestIndex = -1
+            float bestClean = na
+            int bestBoundary = na
+            for index = 0 to rawClean.size() - 1
+                if not consumed.get(index)
+                    float candidateClean =
+                         rawClean.get(index)
+                    int candidateBoundary =
+                         rawBins.get(index)
+                    if na(bestClean) or
+                     candidateClean > bestClean or
+                     (candidateClean == bestClean and
+                      candidateBoundary < bestBoundary)
+                        bestIndex := index
+                        bestClean := candidateClean
+                        bestBoundary := candidateBoundary
+            if bestIndex >= 0
+                consumed.set(bestIndex, true)
+                rankedIndices.push(bestIndex)
+
+    array<int> selectedBins = array.new_int()
+    array<int> selectedRanks = array.new_int()
+    if rankedIndices.size() > 0
+        for rankedPosition = 0 to rankedIndices.size() - 1
+            int index = rankedIndices.get(rankedPosition)
+            string reason = ""
+            if applyDiscoveryGatesInput
+                if rawRatios.get(index) < minimumRatioInput
+                    reason := appendReason(reason, "ratio")
+                if rawNoise.get(index) >
+                 maximumNoiseFractionInput *
+                 rawJumps.get(index)
+                    reason := appendReason(reason, "noise")
+                if rawDenseVolumes.get(index) <
+                 minimumDenseFractionInput *
+                 maximumBinVolume
+                    reason := appendReason(reason, "thin")
+                if rawZ.get(index) < minimumRobustZInput
+                    reason := appendReason(reason, "z")
+
+            int boundary = rawBins.get(index)
+            bool clustered = false
+            if reason == "" and selectedBins.size() > 0
+                for selectedIndex = 0 to selectedBins.size() - 1
+                    if math.abs(
+                         boundary -
+                         selectedBins.get(selectedIndex)) <=
+                         clusterRowsInput
+                        clustered := true
+                        break
+            if reason == "" and not clustered and
+             selectedBins.size() < shelfCountInput
+                selectedBins.push(boundary)
+                selectedRanks.push(rankedPosition + 1)
+
+    if profileValid
+        int histogramWidthMs = int(
+             (profileEndExclusive - profileStartInput) *
+             histogramWidthInput / 100.0)
+        for bin = profileMinBin to profileMaxBin
+            float volumeAtBin = binVolume(profileBins, bin)
+            float relativeWidth =
+                 maximumBinVolume > 0.0 ?
+                 volumeAtBin / maximumBinVolume : 0.0
+            float rowCenterPrice = (
+                 GRID_ORIGIN_TICKS +
+                 bin * outputTicksInput +
+                 outputTicksInput * 0.5) *
+                 syminfo.mintick
+            line histogramLine = line.new(
+                 profileEndExclusive -
+                  int(histogramWidthMs * relativeWidth),
+                 rowCenterPrice,
+                 profileEndExclusive,
+                 rowCenterPrice,
+                 xloc = xloc.bar_time,
+                 color = color.new(rangeColorInput, 65),
+                 width = 2)
+            histogramLines.push(histogramLine)
+
+        pocLine := line.new(
+             profileStartInput, pocPrice,
+             profileEndExclusive, pocPrice,
+             xloc = xloc.bar_time,
+             color = color.orange,
+             width = 2)
+        valueAreaHighLine := line.new(
+             profileStartInput, valueAreaHighPrice,
+             profileEndExclusive, valueAreaHighPrice,
+             xloc = xloc.bar_time,
+             color = color.new(color.silver, 20),
+             style = line.style_dotted)
+        valueAreaLowLine := line.new(
+             profileStartInput, valueAreaLowPrice,
+             profileEndExclusive, valueAreaLowPrice,
+             xloc = xloc.bar_time,
+             color = color.new(color.silver, 20),
+             style = line.style_dotted)
+
+        int shelfEndTime =
+             extendShelvesInput ?
+             time : profileEndExclusive
+        if selectedBins.size() > 0
+            for selectedPosition = 0 to selectedBins.size() - 1
+                int boundary =
+                     selectedBins.get(selectedPosition)
+                int rawIndex = -1
+                for index = 0 to rawBins.size() - 1
+                    if rawBins.get(index) == boundary
+                        rawIndex := index
+                        break
+                if rawIndex >= 0
+                    float shelfPrice = (
+                         GRID_ORIGIN_TICKS +
+                         boundary * outputTicksInput) *
+                         syminfo.mintick
+                    string denseSide =
+                         rawDenseSigns.get(rawIndex) > 0 ?
+                         "ABOVE" :
+                         rawDenseSigns.get(rawIndex) < 0 ?
+                         "BELOW" : "EVEN"
+                    int transparency =
+                         math.min(
+                             70,
+                             5 + selectedPosition * 8)
+                    line shelfLine = line.new(
+                         profileStartInput,
+                         shelfPrice,
+                         shelfEndTime,
+                         shelfPrice,
+                         xloc = xloc.bar_time,
+                         color = color.new(
+                             shelfColorInput,
+                             transparency),
+                         width =
+                             selectedPosition < 2 ? 2 : 1,
+                         style =
+                             selectedPosition < 2 ?
+                             line.style_solid :
+                             line.style_dashed)
+                    shelfLines.push(shelfLine)
+                    string shelfLabelText =
+                         "S" +
+                         str.tostring(
+                             selectedPosition + 1) +
+                         " " +
+                         str.tostring(
+                             shelfPrice,
+                             format.mintick) +
+                         " | " +
+                         str.tostring(
+                             rawRatios.get(rawIndex),
+                             "#.00") +
+                         "x | C " +
+                         str.tostring(
+                             rawClean.get(rawIndex),
+                             "#.000") +
+                         " / z " +
+                         str.tostring(
+                             rawZ.get(rawIndex),
+                             "#.00") +
+                         " | dense " +
+                         denseSide +
+                         " | rank " +
+                         str.tostring(
+                             selectedRanks.get(
+                                 selectedPosition))
+                    label shelfLabel = label.new(
+                         shelfEndTime,
+                         shelfPrice,
+                         shelfLabelText,
+                         xloc = xloc.bar_time,
+                         style = label.style_label_left,
+                         color = color.new(
+                             color.black,
+                             78),
+                         textcolor = color.new(
+                             shelfColorInput,
+                             transparency),
+                         size = size.tiny)
+                    shelfLabels.push(shelfLabel)
+
+    string state =
+         profileValid ? "VALID / EXPERIMENTAL" :
+         not chartSupported ? "USE STANDARD 15m CHART" :
+         not inputWindowValid ? "INVALID INPUT RANGE" :
+         not endpointsComplete ? "ENDPOINT COVERAGE FAIL" :
+         invalidSourceBars > 0 ? "INVALID SOURCE BAR" :
+         sourceArrayIssue ? "SOURCE ARRAY FAIL" :
+         sourceOrderIssue ? "SOURCE ORDER FAIL" :
+         profileOverflow ? "PROFILE CAP FAIL" :
+         not reconciliationValid ? "VOLUME RECONCILIATION FAIL" :
+         "PROFILE ALGORITHM FAIL"
+
+    color headerBg = color.new(#1565c0, 10)
+    color rowBg = color.new(color.black, 20)
+    color warningBg = color.new(#8d6e63, 15)
+    diagnosticRow(
+         diagnosticTable, 0,
+         "VP RSD BAR 0.3", state, headerBg)
+    diagnosticRow(
+         diagnosticTable, 1,
+         "Source timeframe",
+         sourceTimeframeInput + "m bars", warningBg)
+    diagnosticRow(
+         diagnosticTable, 2,
+         "Input start",
+         timeText(profileStartInput), rowBg)
+    diagnosticRow(
+         diagnosticTable, 3,
+         "Input end incl.",
+         timeText(profileEndBarInput), rowBg)
+    diagnosticRow(
+         diagnosticTable, 4,
+         "Source bars",
+         str.tostring(includedSourceBars), rowBg)
+    diagnosticRow(
+         diagnosticTable, 5,
+         "Invalid bars",
+         str.tostring(invalidSourceBars), rowBg)
+    diagnosticRow(
+         diagnosticTable, 6,
+         "Row size",
+         str.tostring(outputTicksInput) +
+         " ticks = " +
+         str.tostring(
+             outputTicksInput * syminfo.mintick,
+             format.mintick),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable, 7,
+         "Source volume",
+         floatText(sourceTotalVolume), rowBg)
+    diagnosticRow(
+         diagnosticTable, 8,
+         "Allocated / diff",
+         floatText(allocatedTotalVolume) +
+         " / " +
+         floatText(
+             allocatedTotalVolume -
+             sourceTotalVolume),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable, 9,
+         "Profile bins",
+         profileValid ?
+             str.tostring(
+                 profileMaxBin -
+                 profileMinBin + 1) :
+             "NA",
+         rowBg)
+    diagnosticRow(
+         diagnosticTable, 10,
+         "POC",
+         str.tostring(pocPrice, format.mintick),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable, 11,
+         "VAL / VAH",
+         str.tostring(
+             valueAreaLowPrice,
+             format.mintick) +
+         " / " +
+         str.tostring(
+             valueAreaHighPrice,
+             format.mintick),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable, 12,
+         "VA achieved",
+         str.tostring(
+             achievedValueAreaPercent,
+             "#.0") + "%",
+         rowBg)
+    diagnosticRow(
+         diagnosticTable, 13,
+         "log eps / C MAD",
+         floatText(logEpsilon) +
+         " / " +
+         floatText(cleanMad),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable, 14,
+         "Gates",
+         applyDiscoveryGatesInput ?
+             "ON (provisional)" :
+             "OFF (raw rank)",
+         rowBg)
+    diagnosticRow(
+         diagnosticTable, 15,
+         "Selected / ranked",
+         str.tostring(selectedBins.size()) +
+         " / " +
+         str.tostring(rankedIndices.size()),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable, 16,
+         "Allocation",
+         "total volume by H-L tick overlap",
+         rowBg)
+    diagnosticRow(
+         diagnosticTable, 17,
+         "Warning",
+         "Native-like research; verify native FRVP",
+         warningBg)
+    diagnosticRow(
+         diagnosticTable, 18,
+         "Range default",
+         "UTC-7; end bar 06:30 included",
+         rowBg)
+    diagnosticRow(
+         diagnosticTable, 19,
+         "Direction split",
+         "not drawn; total-volume profile",
+         rowBg)
+

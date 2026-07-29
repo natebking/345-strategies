@@ -1,0 +1,134 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// at https://mozilla.org/MPL/2.0/
+// © 2026 TheStratSuite contributors
+//@version=6
+
+// Visual-design fixture only.
+// This script does not calculate a Volume Profile, select a candidate, or make
+// a trading claim. It renders one manually supplied, already-validated Value
+// Area edge so the one-zone information budget can be assessed independently.
+indicator(
+     "VP Sparse Visual Fixture v0.0.1",
+     shorttitle = "VP Sparse EXP Fixture",
+     overlay = true,
+     max_labels_count = 1)
+
+string contractGroup = "Validated fixture (manual research input)"
+bool enabledInput = input.bool(
+     false,
+     "Show experimental fixture",
+     group = contractGroup,
+     tooltip = "Off by default. Enable only for the symbol and frozen profile named below.")
+string symbolInput = input.string(
+     "ESU2026",
+     "Exact ticker",
+     group = contractGroup)
+string selectedEdgeInput = input.string(
+     "VAH",
+     "Selected edge",
+     options = ["VAH", "VAL"],
+     group = contractGroup)
+float vahInput = input.float(
+     7455.00,
+     "Validated VAH",
+     step = 0.25,
+     group = contractGroup)
+float valInput = input.float(
+     7425.00,
+     "Validated VAL",
+     step = 0.25,
+     group = contractGroup)
+int effectiveStartInput = input.time(
+     timestamp("24 Jul 2026 13:30 +0000"),
+     "Preview start",
+     group = contractGroup)
+int effectiveEndInput = input.time(
+     timestamp("24 Jul 2026 20:15 +0000"),
+     "Preview end",
+     group = contractGroup)
+
+string geometryGroup = "Locked geometry"
+int outputBinTicksInput = input.int(
+     4,
+     "Output-bin ticks",
+     options = [4],
+     group = geometryGroup)
+
+bool validContract = enabledInput and
+     syminfo.ticker == symbolInput and
+     timeframe.isintraday and
+     effectiveStartInput < effectiveEndInput and
+     vahInput > valInput and
+     valInput > 0.0
+
+float edgePrice = selectedEdgeInput == "VAH" ? vahInput : valInput
+float zoneLow = selectedEdgeInput == "VAH" ?
+     edgePrice - outputBinTicksInput * syminfo.mintick :
+     edgePrice
+float zoneHigh = selectedEdgeInput == "VAH" ?
+     edgePrice :
+     edgePrice + outputBinTicksInput * syminfo.mintick
+float zoneCenter = math.avg(zoneLow, zoneHigh)
+
+bool activeWindow = validContract and
+     time >= effectiveStartInput and
+     time < effectiveEndInput
+
+color haloColor = color.new(color.rgb(132, 145, 156), 88)
+color centerColor = color.new(color.rgb(132, 145, 156), 30)
+color labelColor = color.new(color.rgb(132, 145, 156), 72)
+
+upperBoundPlot = plot(
+     activeWindow ? zoneHigh : na,
+     "EXP zone upper",
+     color = color.new(centerColor, 100),
+     display = display.all)
+lowerBoundPlot = plot(
+     activeWindow ? zoneLow : na,
+     "EXP zone lower",
+     color = color.new(centerColor, 100),
+     display = display.all)
+fill(upperBoundPlot, lowerBoundPlot, color = haloColor, title = "EXP zone halo")
+plot(
+     activeWindow ? zoneCenter : na,
+     "EXP zone center",
+     color = centerColor,
+     linewidth = 1,
+     style = plot.style_linebr)
+
+var label fixtureLabel = na
+if activeWindow
+    if na(fixtureLabel)
+        fixtureLabel := label.new(
+             time,
+             zoneCenter,
+             "EXP VA EDGE " + str.tostring(edgePrice, format.mintick),
+             xloc = xloc.bar_time,
+             yloc = yloc.price,
+             color = labelColor,
+             style = label.style_label_left,
+             textcolor = color.rgb(224, 228, 232),
+             size = size.tiny)
+    else
+        label.set_x(fixtureLabel, time)
+        label.set_y(fixtureLabel, zoneCenter)
+        label.set_text(
+             fixtureLabel,
+             "EXP VA EDGE " + str.tostring(edgePrice, format.mintick))
+
+plot(
+     activeWindow ? 1.0 : 0.0,
+     "Fixture.Active",
+     display = display.data_window)
+plot(
+     validContract ? edgePrice : na,
+     "Fixture.EdgePrice",
+     display = display.data_window)
+plot(
+     validContract ? zoneLow : na,
+     "Fixture.ZoneLow",
+     display = display.data_window)
+plot(
+     validContract ? zoneHigh : na,
+     "Fixture.ZoneHigh",
+     display = display.data_window)

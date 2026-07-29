@@ -1,0 +1,14 @@
+{
+  "schema": "vpx.attempt/1",
+  "example_only": true,
+  "experiment_id": "VP0-GRID-1",
+  "logical_run_id": "vp0-grid-1-esu2026-20260724-5m-r4-va70",
+  "attempt_id": "a01-20260725T140000Z",
+  "attempt_token": 701240501,
+  "capture_started_utc": "2026-07-25T14:00:00Z",
+  "retry_parent": null,
+  "runner": {
+    "mode": "manual-first-run",
+    "version": "phase0"
+  }
+}

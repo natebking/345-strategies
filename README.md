@@ -23,6 +23,8 @@ Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 - `TheStratSuite_v2.2.2-split.pine` — HTF-straddle T1 period shift + T3 daily reconstruction.
 - `TheStratSuite_v2.2.0.pine` — pre-split baseline.
 - `TheStratSuite_v180_June16_2026.pine` — June 2026 pre-audit original.
+- `research/` — Volume Profile research fixtures and diagnostics (MPL-headered; not part of the
+  shipped indicator). See `pine/research/README.md`.
 
 ### `docs/`
 
@@ -39,7 +41,11 @@ Start at `docs/README.md` (the index). Trader-facing docs live in `docs/concepts
 
 ### `diagnostics/`
 
-Throwaway probe scripts from the HTF-straddle investigation. Not part of the shipped indicator; retained because they document how the straddle behavior was measured.
+Not part of the shipped indicator. Two kinds of material: throwaway probe scripts from the
+HTF-straddle investigation (retained because they document how the straddle behavior was
+measured), and `volume-profile-phase0/` — the offline evidence-gate tooling for the Volume
+Profile research track (four Python `vpx` tools with unit tests, schemas, and worked examples;
+see its README).
 
 ## Engineering ground rules
 

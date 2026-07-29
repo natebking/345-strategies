@@ -1,0 +1,1256 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// at https://mozilla.org/MPL/2.0/
+// © 2026 TheStratSuite contributors
+//@version=6
+
+// DIAGNOSTIC ONLY — no trading signals or production visibility logic.
+//
+// The automatic RSD adapter draws the Macro broadening-wall interval it would
+// select. The native-footprint profile does NOT consume that late-confirmed
+// interval automatically. Instead it uses immutable 15-minute start/end inputs
+// that are known when Pine replays history. Copy the two visible swing-bar times
+// from the RSD box into the inputs, then compare this output with TradingView's
+// native Fixed Range Volume Profile over the same inclusive bars.
+//
+// Endpoint contract:
+//   [Start 15m bar time, End 15m bar time + 15 minutes)
+//
+// Source contract:
+//   one fixed 1-minute request, one nested request.footprint() call, one-tick
+//   primitive rows, fixed ticks-per-row output grid, and no OHLCV fallback.
+//
+// Profile output fails blank on source, footprint, primitive-row, volume
+// reconciliation, ordering, or capacity defects. Session closures are allowed;
+// there is deliberately no continuous-minute gap rule or ES/RTH assumption.
+indicator(
+     "VP + RSD Macro Wall Profile Diagnostic v0.2.0",
+     shorttitle = "VP RSD DIAG 0.2",
+     overlay = true,
+     max_bars_back = 5000,
+     max_lines_count = 500,
+     max_boxes_count = 20,
+     max_labels_count = 100)
+
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+string rangeGroup = "1. Immutable 15m profile range"
+int profileStartInput = input.time(
+     timestamp("23 Jun 2026 12:45 -0700"),
+     "Start swing bar",
+     group = rangeGroup,
+     tooltip = "Select the exact visible 15-minute start bar in chart time.")
+int profileEndBarInput = input.time(
+     timestamp("14 Jul 2026 06:30 -0700"),
+     "End swing bar (included)",
+     group = rangeGroup,
+     tooltip = "Select the exact visible 15-minute end bar in chart time. The script includes that full bar.")
+
+string constructionGroup = "2. Footprint construction"
+int outputTicksInput = input.int(
+     10,
+     "Ticks per row",
+     minval = 1,
+     maxval = 500,
+     group = constructionGroup,
+     tooltip = "Must match native FRVP. Use 25 for the current SPY/DIA/NVDA comparisons and 10 for XLE.")
+float valueAreaPercentInput = input.float(
+     70.0,
+     "Value Area target (%)",
+     minval = 1.0,
+     maxval = 100.0,
+     step = 0.5,
+     group = constructionGroup)
+
+string scoringGroup = "3. Raw shelf scorer"
+int shelfCountInput = input.int(
+     8,
+     "Selected shelf candidates",
+     minval = 1,
+     maxval = 12,
+     group = scoringGroup)
+bool applyDiscoveryGatesInput = input.bool(
+     false,
+     "Apply provisional discovery gates",
+     group = scoringGroup,
+     tooltip = "OFF shows the raw clean-jump ranking. ON applies the provisional ratio, within-side noise, dense-side volume, and robust-z gates.")
+float minimumRatioInput = input.float(
+     1.75,
+     "Gate: minimum ratio",
+     minval = 1.0,
+     step = 0.05,
+     group = scoringGroup)
+float maximumNoiseFractionInput = input.float(
+     0.50,
+     "Gate: max W / J",
+     minval = 0.0,
+     step = 0.05,
+     group = scoringGroup)
+float minimumDenseFractionInput = input.float(
+     0.20,
+     "Gate: dense side / max row volume",
+     minval = 0.0,
+     maxval = 1.0,
+     step = 0.05,
+     group = scoringGroup)
+float minimumRobustZInput = input.float(
+     2.50,
+     "Gate: minimum robust z",
+     minval = 0.0,
+     step = 0.25,
+     group = scoringGroup)
+int clusterRowsInput = input.int(
+     2,
+     "Cluster radius (rows)",
+     minval = 0,
+     maxval = 10,
+     group = scoringGroup)
+bool extendShelvesInput = input.bool(
+     true,
+     "Extend selected shelves to current bar",
+     group = scoringGroup)
+
+string rsdGroup = "4. RSD v1.7 Macro comparison"
+string macroTF = input.string(
+     "240",
+     "Macro timeframe",
+     options = ["60", "240"],
+     group = rsdGroup)
+bool useMultiN = input.bool(false, "Multi-N pass", group = rsdGroup)
+int nFast = input.int(3, "N fast", minval = 2, maxval = 10, group = rsdGroup)
+int nMed = input.int(5, "N medium", minval = 2, maxval = 20, group = rsdGroup)
+int rightBars = input.int(2, "Right bars", minval = 1, maxval = 10, group = rsdGroup)
+bool wallRequireBothSides = input.bool(
+     true,
+     "Require two-sided broadening",
+     group = rsdGroup)
+bool hideSteepWalls = input.bool(true, "Hide steep walls", group = rsdGroup)
+float maxWallSlope = input.float(
+     0.05,
+     "Max wall slope (ATR/bar)",
+     minval = 0.0,
+     step = 0.01,
+     group = rsdGroup)
+
+string displayGroup = "5. Display"
+float histogramWidthInput = input.float(
+     24.0,
+     "Histogram width (% of range)",
+     minval = 5.0,
+     maxval = 50.0,
+     group = displayGroup)
+color rsdColorInput = input.color(#26c6da, "RSD range", group = displayGroup)
+color profileColorInput = input.color(#b39ddb, "Input profile range", group = displayGroup)
+color shelfColorInput = input.color(#ffd54f, "Shelf candidates", group = displayGroup)
+
+
+// ============================================================================
+// CONSTANTS AND HELPERS
+// ============================================================================
+
+const string SOURCE_TIMEFRAME = "1"
+const int MINUTE_MS = 60000
+const int PROFILE_BAR_MS = 15 * MINUTE_MS
+const int PRIMITIVE_TICKS = 1
+const int GRID_ORIGIN_TICKS = 0
+// Keep histogram + POC/VA + shelf drawings below Pine's 500-line ceiling.
+const int MAX_PROFILE_BINS = 400
+const int SHELF_SIDE_ROWS = 3
+const int MAX_RANKED_DIAGNOSTICS = 60
+
+int profileEndExclusive = profileEndBarInput + PROFILE_BAR_MS
+
+priceToTicks(float price) =>
+    na(price) ? na : int(math.round(price / syminfo.mintick))
+
+binVolume(map<int, float> bins, int bin) =>
+    bins.contains(bin) ? bins.get(bin) : 0.0
+
+median3(float a, float b, float c) =>
+    a + b + c -
+     math.min(a, math.min(b, c)) -
+     math.max(a, math.max(b, c))
+
+mad3(float a, float b, float c, float center) =>
+    median3(
+         math.abs(a - center),
+         math.abs(b - center),
+         math.abs(c - center))
+
+medianSorted(array<float> values) =>
+    int count = values.size()
+    float result = na
+    if count > 0
+        int middle = int(math.floor(count / 2.0))
+        result := count % 2 == 1 ?
+             values.get(middle) :
+             math.avg(values.get(middle - 1), values.get(middle))
+    result
+
+appendReason(string existing, string addition) =>
+    existing == "" ? addition : existing + "+" + addition
+
+timeText(int value) =>
+    na(value) ? "NA" :
+     str.format_time(value, "yyyy-MM-dd HH:mm", syminfo.timezone)
+
+floatText(float value) =>
+    na(value) ? "NA" : str.tostring(value, "#.########")
+
+clearLines(array<line> drawings) =>
+    int count = drawings.size()
+    if count > 0
+        for index = 0 to count - 1
+            line.delete(drawings.get(index))
+    drawings.clear()
+
+clearLabels(array<label> drawings) =>
+    int count = drawings.size()
+    if count > 0
+        for index = 0 to count - 1
+            label.delete(drawings.get(index))
+    drawings.clear()
+
+diagnosticRow(table target, int row, string key, string value, color background) =>
+    table.cell(
+         target, 0, row, key,
+         text_color = color.silver,
+         text_size = size.tiny,
+         bgcolor = background,
+         text_halign = text.align_left)
+    table.cell(
+         target, 1, row, value,
+         text_color = color.white,
+         text_size = size.tiny,
+         bgcolor = background,
+         text_halign = text.align_left)
+
+boundedPut(
+     map<int, float> bins,
+     int key,
+     float addedVolume,
+     int currentMin,
+     int currentMax) =>
+    bool alreadyPresent = bins.contains(key)
+    int candidateMin = na(currentMin) ? key : math.min(currentMin, key)
+    int candidateMax = na(currentMax) ? key : math.max(currentMax, key)
+    bool overflow = candidateMax - candidateMin + 1 > MAX_PROFILE_BINS or
+         (not alreadyPresent and bins.size() >= MAX_PROFILE_BINS)
+    int nextMin = currentMin
+    int nextMax = currentMax
+    if not overflow
+        bins.put(key, binVolume(bins, key) + addedVolume)
+        nextMin := candidateMin
+        nextMax := candidateMax
+    [nextMin, nextMax, overflow]
+
+htfTimeToBar(int pivotTime) =>
+    int maxOffset = math.min(bar_index, 4999)
+    int result = bar_index
+    if not na(pivotTime) and pivotTime > 0
+        result := bar_index - maxOffset
+        for offset = 0 to maxOffset
+            if time[offset] <= pivotTime
+                result := bar_index - offset
+                break
+    result
+
+
+// ============================================================================
+// RSD v1.7 MACRO SWING PATH (HTF CONFLUENCE OFF)
+// ============================================================================
+
+findMacroPivots() =>
+    bool highMedCondition = not na(ta.pivothigh(high, nMed, rightBars))
+    bool lowMedCondition = not na(ta.pivotlow(low, nMed, rightBars))
+
+    float high0Med = ta.valuewhen(highMedCondition, high[rightBars], 0)[1]
+    int highTime0Med = ta.valuewhen(highMedCondition, time[rightBars], 0)[1]
+    float high1Med = ta.valuewhen(highMedCondition, high[rightBars], 1)[1]
+    int highTime1Med = ta.valuewhen(highMedCondition, time[rightBars], 1)[1]
+    float high2Med = ta.valuewhen(highMedCondition, high[rightBars], 2)[1]
+    int highTime2Med = ta.valuewhen(highMedCondition, time[rightBars], 2)[1]
+
+    float low0Med = ta.valuewhen(lowMedCondition, low[rightBars], 0)[1]
+    int lowTime0Med = ta.valuewhen(lowMedCondition, time[rightBars], 0)[1]
+    float low1Med = ta.valuewhen(lowMedCondition, low[rightBars], 1)[1]
+    int lowTime1Med = ta.valuewhen(lowMedCondition, time[rightBars], 1)[1]
+    float low2Med = ta.valuewhen(lowMedCondition, low[rightBars], 2)[1]
+    int lowTime2Med = ta.valuewhen(lowMedCondition, time[rightBars], 2)[1]
+
+    bool highFastCondition = not na(ta.pivothigh(high, nFast, rightBars))
+    bool lowFastCondition = not na(ta.pivotlow(low, nFast, rightBars))
+
+    float high0Fast = useMultiN ? ta.valuewhen(highFastCondition, high[rightBars], 0)[1] : na
+    int highTime0Fast = useMultiN ? ta.valuewhen(highFastCondition, time[rightBars], 0)[1] : na
+    float high1Fast = useMultiN ? ta.valuewhen(highFastCondition, high[rightBars], 1)[1] : na
+    int highTime1Fast = useMultiN ? ta.valuewhen(highFastCondition, time[rightBars], 1)[1] : na
+    float high2Fast = useMultiN ? ta.valuewhen(highFastCondition, high[rightBars], 2)[1] : na
+    int highTime2Fast = useMultiN ? ta.valuewhen(highFastCondition, time[rightBars], 2)[1] : na
+
+    float low0Fast = useMultiN ? ta.valuewhen(lowFastCondition, low[rightBars], 0)[1] : na
+    int lowTime0Fast = useMultiN ? ta.valuewhen(lowFastCondition, time[rightBars], 0)[1] : na
+    float low1Fast = useMultiN ? ta.valuewhen(lowFastCondition, low[rightBars], 1)[1] : na
+    int lowTime1Fast = useMultiN ? ta.valuewhen(lowFastCondition, time[rightBars], 1)[1] : na
+    float low2Fast = useMultiN ? ta.valuewhen(lowFastCondition, low[rightBars], 2)[1] : na
+    int lowTime2Fast = useMultiN ? ta.valuewhen(lowFastCondition, time[rightBars], 2)[1] : na
+
+    [high0Med, highTime0Med, high1Med, highTime1Med, high2Med, highTime2Med,
+     low0Med, lowTime0Med, low1Med, lowTime1Med, low2Med, lowTime2Med,
+     high0Fast, highTime0Fast, high1Fast, highTime1Fast, high2Fast, highTime2Fast,
+     low0Fast, lowTime0Fast, low1Fast, lowTime1Fast, low2Fast, lowTime2Fast]
+
+reduceTopThreeByTime(
+     float p0, int t0, float p1, int t1, float p2, int t2,
+     float p3, int t3, float p4, int t4, float p5, int t5) =>
+    array<float> prices = array.from(p0, p1, p2, p3, p4, p5)
+    array<int> times = array.from(t0, t1, t2, t3, t4, t5)
+    array<float> validPrices = array.new_float()
+    array<int> validTimes = array.new_int()
+
+    for index = 0 to 5
+        float candidatePrice = prices.get(index)
+        int candidateTime = times.get(index)
+        if not na(candidatePrice) and not na(candidateTime) and candidateTime > 0
+            bool duplicate = false
+            int validCount = validTimes.size()
+            if validCount > 0
+                for validIndex = 0 to validCount - 1
+                    if math.abs(candidateTime - validTimes.get(validIndex)) < MINUTE_MS and
+                     math.abs(candidatePrice - validPrices.get(validIndex)) < syminfo.mintick
+                        duplicate := true
+                        break
+            if not duplicate
+                validPrices.push(candidatePrice)
+                validTimes.push(candidateTime)
+
+    int sortCount = validTimes.size()
+    if sortCount > 1
+        for index = 1 to sortCount - 1
+            int candidateTime = validTimes.get(index)
+            float candidatePrice = validPrices.get(index)
+            int insertionIndex = index - 1
+            while insertionIndex >= 0 and validTimes.get(insertionIndex) < candidateTime
+                validTimes.set(insertionIndex + 1, validTimes.get(insertionIndex))
+                validPrices.set(insertionIndex + 1, validPrices.get(insertionIndex))
+                insertionIndex -= 1
+            validTimes.set(insertionIndex + 1, candidateTime)
+            validPrices.set(insertionIndex + 1, candidatePrice)
+
+    float newestPrice = na
+    int newestTime = na
+    float priorPrice = na
+    int priorTime = na
+    float farPrice = na
+    int farTime = na
+    if validTimes.size() >= 1
+        newestPrice := validPrices.get(0)
+        newestTime := validTimes.get(0)
+    if validTimes.size() >= 2
+        priorPrice := validPrices.get(1)
+        priorTime := validTimes.get(1)
+    if validTimes.size() >= 3
+        farPrice := validPrices.get(2)
+        farTime := validTimes.get(2)
+    [newestPrice, newestTime, priorPrice, priorTime, farPrice, farTime]
+
+[macroHigh0Med, macroHighTime0Med,
+ macroHigh1Med, macroHighTime1Med,
+ macroHigh2Med, macroHighTime2Med,
+ macroLow0Med, macroLowTime0Med,
+ macroLow1Med, macroLowTime1Med,
+ macroLow2Med, macroLowTime2Med,
+ macroHigh0Fast, macroHighTime0Fast,
+ macroHigh1Fast, macroHighTime1Fast,
+ macroHigh2Fast, macroHighTime2Fast,
+ macroLow0Fast, macroLowTime0Fast,
+ macroLow1Fast, macroLowTime1Fast,
+ macroLow2Fast, macroLowTime2Fast] = request.security(
+     syminfo.tickerid,
+     macroTF,
+     findMacroPivots(),
+     lookahead = barmerge.lookahead_on)
+
+[macroOuterHigh, macroOuterHighTime,
+ macroPriorHigh, macroPriorHighTime,
+ macroFarHigh, macroFarHighTime] = reduceTopThreeByTime(
+     macroHigh0Med, macroHighTime0Med,
+     macroHigh1Med, macroHighTime1Med,
+     macroHigh2Med, macroHighTime2Med,
+     macroHigh0Fast, macroHighTime0Fast,
+     macroHigh1Fast, macroHighTime1Fast,
+     macroHigh2Fast, macroHighTime2Fast)
+
+[macroOuterLow, macroOuterLowTime,
+ macroPriorLow, macroPriorLowTime,
+ macroFarLow, macroFarLowTime] = reduceTopThreeByTime(
+     macroLow0Med, macroLowTime0Med,
+     macroLow1Med, macroLowTime1Med,
+     macroLow2Med, macroLowTime2Med,
+     macroLow0Fast, macroLowTime0Fast,
+     macroLow1Fast, macroLowTime1Fast,
+     macroLow2Fast, macroLowTime2Fast)
+
+
+// ============================================================================
+// ONE FIXED NATIVE-FOOTPRINT REQUEST
+// ============================================================================
+
+oneMinutePayload() =>
+    footprint fp = request.footprint(
+         PRIMITIVE_TICKS,
+         va_percent = valueAreaPercentInput)
+    [time, fp]
+
+[sourceTimes, sourceFootprints] = request.security_lower_tf(
+     syminfo.tickerid,
+     SOURCE_TIMEFRAME,
+     oneMinutePayload(),
+     ignore_invalid_timeframe = true)
+
+bool chartSupported = chart.is_standard and
+     timeframe.isminutes and
+     timeframe.in_seconds() == 15 * 60
+bool inputWindowValid = profileStartInput < profileEndBarInput and
+     profileStartInput % MINUTE_MS == 0 and
+     profileEndBarInput % MINUTE_MS == 0
+
+var map<int, float> profileBins = map.new<int, float>()
+var int profileMinBin = na
+var int profileMaxBin = na
+var float profileTotalVolume = 0.0
+var int includedMinuteCount = 0
+var int includedRowCount = 0
+var int firstIncludedMinute = na
+var int lastIncludedMinute = na
+var int previousIncludedMinute = na
+var int missingFootprintCount = 0
+var int primitiveIssueCount = 0
+var int reconciliationIssueCount = 0
+var bool profileOverflow = false
+var bool sourceArrayIssue = false
+var bool sourceOrderIssue = false
+
+if chartSupported and inputWindowValid and barstate.isconfirmed
+    int timeCount = sourceTimes.size()
+    int footprintCount = sourceFootprints.size()
+    sourceArrayIssue := sourceArrayIssue or timeCount != footprintCount
+    int safeCount = math.min(timeCount, footprintCount)
+
+    if safeCount > 0
+        for sourceIndex = 0 to safeCount - 1
+            int sourceTime = sourceTimes.get(sourceIndex)
+            footprint sourceFootprint = sourceFootprints.get(sourceIndex)
+            bool useForProfile = not na(sourceTime) and
+                 sourceTime >= profileStartInput and
+                 sourceTime < profileEndExclusive
+
+            if useForProfile
+                firstIncludedMinute := includedMinuteCount == 0 ?
+                     sourceTime : firstIncludedMinute
+                sourceOrderIssue := sourceOrderIssue or
+                     (not na(previousIncludedMinute) and
+                      sourceTime <= previousIncludedMinute)
+                previousIncludedMinute := sourceTime
+                lastIncludedMinute := sourceTime
+                includedMinuteCount += 1
+
+                bool footprintAvailable = not na(sourceFootprint)
+                missingFootprintCount += footprintAvailable ? 0 : 1
+
+                if footprintAvailable
+                    array<volume_row> rows = sourceFootprint.rows()
+                    int minuteRowCount = rows.size()
+                    float footprintTotal = sourceFootprint.total_volume()
+                    float summedRowVolume = 0.0
+                    bool minutePrimitiveIssue = false
+
+                    for row in rows
+                        float rowDown = row.down_price()
+                        float rowUp = row.up_price()
+                        float rowVolume = row.total_volume()
+                        int downTicks = priceToTicks(rowDown)
+                        int upTicks = priceToTicks(rowUp)
+                        bool rowValuesValid = not na(rowDown) and
+                             not na(rowUp) and
+                             not na(rowVolume) and
+                             rowVolume >= 0.0
+                        float rowSpanTicks = rowValuesValid ?
+                             (rowUp - rowDown) / syminfo.mintick : na
+                        bool rowBoundsAligned = rowValuesValid and
+                             math.abs(rowDown / syminfo.mintick - downTicks) <= 0.000001 and
+                             math.abs(rowUp / syminfo.mintick - upTicks) <= 0.000001
+                        bool primitiveSpanValid = rowValuesValid and
+                             rowBoundsAligned and
+                             math.abs(rowSpanTicks - PRIMITIVE_TICKS) <= 0.000001
+                        minutePrimitiveIssue := minutePrimitiveIssue or
+                             not primitiveSpanValid
+
+                        if rowValuesValid
+                            summedRowVolume += rowVolume
+                            float rowMidpoint = math.avg(rowDown, rowUp)
+                            int midpointTicks = int(math.round(
+                                 rowMidpoint / syminfo.mintick))
+                            int outputBin = int(math.floor(
+                                 (midpointTicks - GRID_ORIGIN_TICKS) /
+                                 float(outputTicksInput)))
+                            [nextMin, nextMax, putOverflow] = boundedPut(
+                                 profileBins,
+                                 outputBin,
+                                 rowVolume,
+                                 profileMinBin,
+                                 profileMaxBin)
+                            profileMinBin := nextMin
+                            profileMaxBin := nextMax
+                            profileOverflow := profileOverflow or putOverflow
+                            profileTotalVolume += rowVolume
+
+                    float reconciliationTolerance = math.max(
+                         0.000001,
+                         math.abs(nz(footprintTotal, 0.0)) * 0.000000001)
+                    bool minuteReconciliationIssue = na(footprintTotal) or
+                         math.abs(summedRowVolume - footprintTotal) >
+                         reconciliationTolerance
+                    includedRowCount += minuteRowCount
+                    primitiveIssueCount += minutePrimitiveIssue ? 1 : 0
+                    reconciliationIssueCount +=
+                         minuteReconciliationIssue ? 1 : 0
+
+
+// ============================================================================
+// POC / CONTIGUOUS VALUE AREA
+// ============================================================================
+
+calculateProfile(
+     map<int, float> bins,
+     int minBin,
+     int maxBin,
+     float totalVolume) =>
+    bool valid = not na(minBin) and not na(maxBin) and
+         maxBin >= minBin and
+         maxBin - minBin + 1 <= MAX_PROFILE_BINS and
+         bins.size() > 0 and totalVolume > 0.0
+    int pocBin = na
+    int valueAreaLowBin = na
+    int valueAreaHighBin = na
+    float achievedPercent = na
+    float maximumVolume = na
+
+    if valid
+        float weightedCenter2 = 0.0
+        for bin = minBin to maxBin
+            float volumeAtBin = binVolume(bins, bin)
+            int center2 = 2 * (
+                 GRID_ORIGIN_TICKS + bin * outputTicksInput) +
+                 outputTicksInput
+            weightedCenter2 += volumeAtBin * center2
+            maximumVolume := na(maximumVolume) ?
+                 volumeAtBin : math.max(maximumVolume, volumeAtBin)
+
+        float meanCenter2 = weightedCenter2 / totalVolume
+        float bestDistance = na
+        float tieTolerance = math.max(
+             0.000000001,
+             math.abs(maximumVolume) * 0.000000000001)
+        for bin = minBin to maxBin
+            float volumeAtBin = binVolume(bins, bin)
+            if math.abs(volumeAtBin - maximumVolume) <= tieTolerance
+                int center2 = 2 * (
+                     GRID_ORIGIN_TICKS + bin * outputTicksInput) +
+                     outputTicksInput
+                float distance = math.abs(center2 - meanCenter2)
+                if na(bestDistance) or
+                 distance < bestDistance - 0.000000001 or
+                 (math.abs(distance - bestDistance) <= 0.000000001 and
+                  bin < pocBin)
+                    pocBin := bin
+                    bestDistance := distance
+
+        if not na(pocBin)
+            valueAreaLowBin := pocBin
+            valueAreaHighBin := pocBin
+            float includedVolume = binVolume(bins, pocBin)
+            float targetVolume =
+                 totalVolume * valueAreaPercentInput / 100.0
+            float volumeTolerance = math.max(
+                 0.000000001,
+                 math.abs(totalVolume) * 0.000000000001)
+            int steps = 0
+            while includedVolume < targetVolume - volumeTolerance and
+             steps < MAX_PROFILE_BINS
+                bool hasLower = valueAreaLowBin > minBin
+                bool hasUpper = valueAreaHighBin < maxBin
+                if not hasLower and not hasUpper
+                    break
+                int lowerCandidate = valueAreaLowBin - 1
+                int upperCandidate = valueAreaHighBin + 1
+                float lowerVolume = hasLower ?
+                     binVolume(bins, lowerCandidate) : na
+                float upperVolume = hasUpper ?
+                     binVolume(bins, upperCandidate) : na
+                bool chooseUpper = not hasLower
+                if hasLower and hasUpper
+                    chooseUpper := upperVolume > lowerVolume or
+                         (upperVolume == lowerVolume and
+                          math.abs(upperCandidate - pocBin) <=
+                          math.abs(lowerCandidate - pocBin))
+                float selectedVolume =
+                     chooseUpper ? upperVolume : lowerVolume
+                if includedVolume + selectedVolume >
+                 targetVolume + volumeTolerance
+                    break
+                if chooseUpper
+                    valueAreaHighBin := upperCandidate
+                else
+                    valueAreaLowBin := lowerCandidate
+                includedVolume += selectedVolume
+                steps += 1
+            achievedPercent := includedVolume / totalVolume * 100.0
+
+    [valid and not na(pocBin),
+     pocBin,
+     valueAreaLowBin,
+     valueAreaHighBin,
+     achievedPercent,
+     maximumVolume]
+
+
+// ============================================================================
+// DRAWING STATE
+// ============================================================================
+
+var box rsdRangeBox = na
+var box inputRangeBox = na
+var line pocLine = na
+var line valueAreaHighLine = na
+var line valueAreaLowLine = na
+var array<line> histogramLines = array.new_line()
+var array<line> shelfLines = array.new_line()
+var array<label> shelfLabels = array.new_label()
+var table diagnosticTable = table.new(
+     position.top_right,
+     2,
+     22,
+     frame_color = color.new(color.gray, 35),
+     frame_width = 1,
+     border_color = color.new(color.gray, 70),
+     border_width = 1)
+var bool logsEmitted = false
+float chartAtr = ta.atr(14)
+
+
+// ============================================================================
+// LAST-BAR DIAGNOSTICS
+// ============================================================================
+
+if barstate.islast
+    if not na(rsdRangeBox)
+        box.delete(rsdRangeBox)
+        rsdRangeBox := na
+    if not na(inputRangeBox)
+        box.delete(inputRangeBox)
+        inputRangeBox := na
+    if not na(pocLine)
+        line.delete(pocLine)
+        pocLine := na
+    if not na(valueAreaHighLine)
+        line.delete(valueAreaHighLine)
+        valueAreaHighLine := na
+    if not na(valueAreaLowLine)
+        line.delete(valueAreaLowLine)
+        valueAreaLowLine := na
+    clearLines(histogramLines)
+    clearLines(shelfLines)
+    clearLabels(shelfLabels)
+
+    // ------------------------------------------------------------------------
+    // Automatic RSD wall interval — visual comparison only.
+    // ------------------------------------------------------------------------
+
+    float maxSlopeAbsolute = maxWallSlope * nz(chartAtr, 0.0)
+    bool primaryHighWall = not na(macroOuterHigh) and
+         not na(macroPriorHigh) and macroOuterHigh > macroPriorHigh
+    bool shiftedHighWall = not primaryHighWall and
+         not na(macroPriorHigh) and not na(macroFarHigh) and
+         macroPriorHigh > macroFarHigh
+    bool primaryLowWall = not na(macroOuterLow) and
+         not na(macroPriorLow) and macroOuterLow < macroPriorLow
+    bool shiftedLowWall = not primaryLowWall and
+         not na(macroPriorLow) and not na(macroFarLow) and
+         macroPriorLow < macroFarLow
+    bool highExpansion = not na(macroOuterHigh) and
+         not na(macroPriorHigh) and not na(macroFarHigh) and
+         math.max(macroOuterHigh, macroPriorHigh) > macroFarHigh
+    bool lowExpansion = not na(macroOuterLow) and
+         not na(macroPriorLow) and not na(macroFarLow) and
+         math.min(macroOuterLow, macroPriorLow) < macroFarLow
+    bool wallsAllowed =
+         not wallRequireBothSides or (highExpansion and lowExpansion)
+
+    bool upperValid = false
+    int upperStart = na
+    int upperEnd = na
+    float upperStartPrice = na
+    float upperEndPrice = na
+    bool lowerValid = false
+    int lowerStart = na
+    int lowerEnd = na
+    float lowerStartPrice = na
+    float lowerEndPrice = na
+
+    if wallsAllowed and primaryHighWall
+        int outerBar = htfTimeToBar(macroOuterHighTime)
+        int priorBar = htfTimeToBar(macroPriorHighTime)
+        bool useFar = not na(macroFarHigh) and
+             not na(macroFarHighTime) and
+             macroFarHigh < macroOuterHigh
+        if useFar
+            int farBar = htfTimeToBar(macroFarHighTime)
+            if farBar != outerBar
+                float spanSlope =
+                     (macroOuterHigh - macroFarHigh) / (outerBar - farBar)
+                float lineAtPrior =
+                     macroFarHigh + spanSlope * (priorBar - farBar)
+                useFar := macroPriorHigh <= lineAtPrior + syminfo.mintick
+        float anchorPrice = useFar ? macroFarHigh : macroPriorHigh
+        int anchorTime = useFar ? macroFarHighTime : macroPriorHighTime
+        int anchorBar = htfTimeToBar(anchorTime)
+        if anchorBar != outerBar
+            float slope =
+                 (macroOuterHigh - anchorPrice) / (outerBar - anchorBar)
+            upperValid := not hideSteepWalls or
+                 math.abs(slope) <= maxSlopeAbsolute
+            upperStart := anchorTime
+            upperEnd := macroOuterHighTime
+            upperStartPrice := anchorPrice
+            upperEndPrice := macroOuterHigh
+    else if wallsAllowed and shiftedHighWall
+        int anchorBar = htfTimeToBar(macroFarHighTime)
+        int endBar = htfTimeToBar(macroPriorHighTime)
+        if anchorBar != endBar
+            float slope =
+                 (macroPriorHigh - macroFarHigh) / (endBar - anchorBar)
+            upperValid := not hideSteepWalls or
+                 math.abs(slope) <= maxSlopeAbsolute
+            upperStart := macroFarHighTime
+            upperEnd := macroPriorHighTime
+            upperStartPrice := macroFarHigh
+            upperEndPrice := macroPriorHigh
+
+    if wallsAllowed and primaryLowWall
+        int outerBar = htfTimeToBar(macroOuterLowTime)
+        int priorBar = htfTimeToBar(macroPriorLowTime)
+        bool useFar = not na(macroFarLow) and
+             not na(macroFarLowTime) and macroFarLow > macroOuterLow
+        if useFar
+            int farBar = htfTimeToBar(macroFarLowTime)
+            if farBar != outerBar
+                float spanSlope =
+                     (macroOuterLow - macroFarLow) / (outerBar - farBar)
+                float lineAtPrior =
+                     macroFarLow + spanSlope * (priorBar - farBar)
+                useFar := macroPriorLow >= lineAtPrior - syminfo.mintick
+        float anchorPrice = useFar ? macroFarLow : macroPriorLow
+        int anchorTime = useFar ? macroFarLowTime : macroPriorLowTime
+        int anchorBar = htfTimeToBar(anchorTime)
+        if anchorBar != outerBar
+            float slope =
+                 (macroOuterLow - anchorPrice) / (outerBar - anchorBar)
+            lowerValid := not hideSteepWalls or
+                 math.abs(slope) <= maxSlopeAbsolute
+            lowerStart := anchorTime
+            lowerEnd := macroOuterLowTime
+            lowerStartPrice := anchorPrice
+            lowerEndPrice := macroOuterLow
+    else if wallsAllowed and shiftedLowWall
+        int anchorBar = htfTimeToBar(macroFarLowTime)
+        int endBar = htfTimeToBar(macroPriorLowTime)
+        if anchorBar != endBar
+            float slope =
+                 (macroPriorLow - macroFarLow) / (endBar - anchorBar)
+            lowerValid := not hideSteepWalls or
+                 math.abs(slope) <= maxSlopeAbsolute
+            lowerStart := macroFarLowTime
+            lowerEnd := macroPriorLowTime
+            lowerStartPrice := macroFarLow
+            lowerEndPrice := macroPriorLow
+
+    bool useLower = lowerValid and
+         (not upperValid or lowerEnd > upperEnd or
+          (lowerEnd == upperEnd and
+           lowerEnd - lowerStart >= upperEnd - upperStart))
+    bool rsdRangeValid = upperValid or lowerValid
+    int rsdStartMacro = useLower ? lowerStart : upperStart
+    int rsdEndMacro = useLower ? lowerEnd : upperEnd
+    float rsdStartPrice =
+         useLower ? lowerStartPrice : upperStartPrice
+    float rsdEndPrice = useLower ? lowerEndPrice : upperEndPrice
+    string rsdSide = useLower ? "LOW WALL" : "HIGH WALL"
+    int rsdStart = rsdStartMacro
+    int rsdEndBar = rsdEndMacro
+    int macroDurationMs = int(timeframe.in_seconds(macroTF) * 1000)
+
+    if rsdRangeValid
+        int refinementBars = math.min(bar_index, 4999)
+        for offset = 0 to refinementBars
+            bool inStartMacro = time[offset] >= rsdStartMacro and
+                 time[offset] < rsdStartMacro + macroDurationMs
+            bool inEndMacro = time[offset] >= rsdEndMacro and
+                 time[offset] < rsdEndMacro + macroDurationMs
+            bool startMatch = useLower ?
+                 math.abs(low[offset] - rsdStartPrice) <= syminfo.mintick * 0.5 :
+                 math.abs(high[offset] - rsdStartPrice) <= syminfo.mintick * 0.5
+            bool endMatch = useLower ?
+                 math.abs(low[offset] - rsdEndPrice) <= syminfo.mintick * 0.5 :
+                 math.abs(high[offset] - rsdEndPrice) <= syminfo.mintick * 0.5
+            if inStartMacro and startMatch
+                rsdStart := time[offset]
+            if inEndMacro and endMatch
+                rsdEndBar := time[offset]
+
+    int rsdEndExclusive = rsdRangeValid ?
+         rsdEndBar + PROFILE_BAR_MS : na
+    float rsdOutlineHigh = na
+    float rsdOutlineLow = na
+    float inputOutlineHigh = na
+    float inputOutlineLow = na
+    int scanBars = math.min(bar_index, 4999)
+    for offset = 0 to scanBars
+        if rsdRangeValid and time[offset] >= rsdStart and
+         time[offset] < rsdEndExclusive
+            rsdOutlineHigh := na(rsdOutlineHigh) ?
+                 high[offset] : math.max(rsdOutlineHigh, high[offset])
+            rsdOutlineLow := na(rsdOutlineLow) ?
+                 low[offset] : math.min(rsdOutlineLow, low[offset])
+        if time[offset] >= profileStartInput and
+         time[offset] < profileEndExclusive
+            inputOutlineHigh := na(inputOutlineHigh) ?
+                 high[offset] : math.max(inputOutlineHigh, high[offset])
+            inputOutlineLow := na(inputOutlineLow) ?
+                 low[offset] : math.min(inputOutlineLow, low[offset])
+
+    if rsdRangeValid and not na(rsdOutlineHigh)
+        rsdRangeBox := box.new(
+             left = rsdStart,
+             top = rsdOutlineHigh,
+             right = rsdEndExclusive,
+             bottom = rsdOutlineLow,
+             xloc = xloc.bar_time,
+             border_color = rsdColorInput,
+             border_width = 2,
+             border_style = line.style_dashed,
+             bgcolor = color.new(rsdColorInput, 97))
+    if inputWindowValid and not na(inputOutlineHigh)
+        inputRangeBox := box.new(
+             left = profileStartInput,
+             top = inputOutlineHigh,
+             right = profileEndExclusive,
+             bottom = inputOutlineLow,
+             xloc = xloc.bar_time,
+             border_color = profileColorInput,
+             border_width = 1,
+             bgcolor = color.new(profileColorInput, 97))
+
+    // ------------------------------------------------------------------------
+    // Freeze the immutable footprint profile.
+    // ------------------------------------------------------------------------
+
+    bool endpointsComplete =
+         firstIncludedMinute == profileStartInput and
+         lastIncludedMinute + MINUTE_MS == profileEndExclusive
+    bool baseComplete = chartSupported and inputWindowValid and
+         time >= profileEndExclusive and
+         endpointsComplete and
+         includedMinuteCount > 0 and
+         missingFootprintCount == 0 and
+         primitiveIssueCount == 0 and
+         reconciliationIssueCount == 0 and
+         not sourceArrayIssue and
+         not sourceOrderIssue and
+         not profileOverflow
+
+    [algorithmValid,
+     pocBin,
+     valueAreaLowBin,
+     valueAreaHighBin,
+     achievedValueAreaPercent,
+     maximumBinVolume] = calculateProfile(
+         profileBins,
+         profileMinBin,
+         profileMaxBin,
+         profileTotalVolume)
+    bool profileValid = baseComplete and algorithmValid
+
+    float pocPrice = profileValid ?
+         (GRID_ORIGIN_TICKS + pocBin * outputTicksInput +
+          outputTicksInput * 0.5) * syminfo.mintick : na
+    float valueAreaLowPrice = profileValid ?
+         (GRID_ORIGIN_TICKS + valueAreaLowBin * outputTicksInput) *
+         syminfo.mintick : na
+    float valueAreaHighPrice = profileValid ?
+         (GRID_ORIGIN_TICKS + (valueAreaHighBin + 1) *
+          outputTicksInput) * syminfo.mintick : na
+
+    // ------------------------------------------------------------------------
+    // Robust shelf scorer requested for discovery.
+    // ------------------------------------------------------------------------
+
+    array<int> rawBins = array.new_int()
+    array<float> rawJumps = array.new_float()
+    array<float> rawNoise = array.new_float()
+    array<float> rawClean = array.new_float()
+    array<float> rawRatios = array.new_float()
+    array<float> rawDenseVolumes = array.new_float()
+    array<int> rawDenseSigns = array.new_int()
+    array<float> rawZ = array.new_float()
+    array<float> positiveVolumes = array.new_float()
+    float logEpsilon = na
+    float cleanMedian = na
+    float cleanMad = na
+
+    if profileValid
+        for bin = profileMinBin to profileMaxBin
+            float volumeAtBin = binVolume(profileBins, bin)
+            if volumeAtBin > 0.0
+                positiveVolumes.push(volumeAtBin)
+        positiveVolumes.sort(order.ascending)
+        float positiveMedian = medianSorted(positiveVolumes)
+        logEpsilon := math.max(positiveMedian * 0.01, 0.000000001)
+
+        int firstBoundary = profileMinBin + SHELF_SIDE_ROWS
+        int lastBoundary = profileMaxBin - SHELF_SIDE_ROWS + 1
+        if firstBoundary <= lastBoundary
+            for boundary = firstBoundary to lastBoundary
+                float l0 = math.log(binVolume(profileBins, boundary - 3) + logEpsilon)
+                float l1 = math.log(binVolume(profileBins, boundary - 2) + logEpsilon)
+                float l2 = math.log(binVolume(profileBins, boundary - 1) + logEpsilon)
+                float r0 = math.log(binVolume(profileBins, boundary) + logEpsilon)
+                float r1 = math.log(binVolume(profileBins, boundary + 1) + logEpsilon)
+                float r2 = math.log(binVolume(profileBins, boundary + 2) + logEpsilon)
+                float leftMedian = median3(l0, l1, l2)
+                float rightMedian = median3(r0, r1, r2)
+                float jump = math.abs(rightMedian - leftMedian)
+                float withinNoise =
+                     mad3(l0, l1, l2, leftMedian) +
+                     mad3(r0, r1, r2, rightMedian)
+                float cleanJump = math.max(0.0, jump - withinNoise)
+                float denseLog = math.max(leftMedian, rightMedian)
+                float denseVolume = math.max(
+                     0.0, math.exp(denseLog) - logEpsilon)
+                rawBins.push(boundary)
+                rawJumps.push(jump)
+                rawNoise.push(withinNoise)
+                rawClean.push(cleanJump)
+                rawRatios.push(math.exp(jump))
+                rawDenseVolumes.push(denseVolume)
+                rawDenseSigns.push(
+                     rightMedian > leftMedian ? 1 :
+                     rightMedian < leftMedian ? -1 : 0)
+
+        if rawClean.size() > 0
+            array<float> cleanSorted = rawClean.copy()
+            cleanSorted.sort(order.ascending)
+            cleanMedian := medianSorted(cleanSorted)
+            array<float> cleanDeviations = array.new_float()
+            for index = 0 to rawClean.size() - 1
+                cleanDeviations.push(
+                     math.abs(rawClean.get(index) - cleanMedian))
+            cleanDeviations.sort(order.ascending)
+            cleanMad := medianSorted(cleanDeviations)
+            float robustScale = math.max(
+                 1.4826 * cleanMad, 0.000000001)
+            for index = 0 to rawClean.size() - 1
+                rawZ.push(
+                     (rawClean.get(index) - cleanMedian) / robustScale)
+
+    // Rank the strongest 60 raw boundaries, then apply optional discovery
+    // gates and two-row clustering. Default mode has no discovery gates.
+    array<int> rankedIndices = array.new_int()
+    array<bool> consumed = array.new_bool(rawClean.size(), false)
+    int rankLimit = math.min(
+         rawClean.size(), MAX_RANKED_DIAGNOSTICS)
+    if rankLimit > 0
+        for rank = 0 to rankLimit - 1
+            int bestIndex = -1
+            float bestClean = na
+            int bestBoundary = na
+            for index = 0 to rawClean.size() - 1
+                if not consumed.get(index)
+                    float candidateClean = rawClean.get(index)
+                    int candidateBoundary = rawBins.get(index)
+                    if na(bestClean) or candidateClean > bestClean or
+                     (candidateClean == bestClean and
+                      candidateBoundary < bestBoundary)
+                        bestIndex := index
+                        bestClean := candidateClean
+                        bestBoundary := candidateBoundary
+            if bestIndex >= 0
+                consumed.set(bestIndex, true)
+                rankedIndices.push(bestIndex)
+
+    array<int> selectedBins = array.new_int()
+    array<int> selectedRawRanks = array.new_int()
+    array<string> rankedReasons = array.new_string()
+    if rankedIndices.size() > 0
+        for rankedPosition = 0 to rankedIndices.size() - 1
+            int index = rankedIndices.get(rankedPosition)
+            float jump = rawJumps.get(index)
+            float noise = rawNoise.get(index)
+            float ratio = rawRatios.get(index)
+            float denseVolume = rawDenseVolumes.get(index)
+            float robustZ = rawZ.get(index)
+            string reason = ""
+            if applyDiscoveryGatesInput
+                if ratio < minimumRatioInput
+                    reason := appendReason(reason, "ratio")
+                if noise > maximumNoiseFractionInput * jump
+                    reason := appendReason(reason, "noise")
+                if denseVolume < minimumDenseFractionInput * maximumBinVolume
+                    reason := appendReason(reason, "thin")
+                if robustZ < minimumRobustZInput
+                    reason := appendReason(reason, "z")
+
+            int boundary = rawBins.get(index)
+            bool clustered = false
+            if reason == "" and selectedBins.size() > 0
+                for selectedIndex = 0 to selectedBins.size() - 1
+                    if math.abs(boundary - selectedBins.get(selectedIndex)) <=
+                     clusterRowsInput
+                        clustered := true
+                        break
+            if clustered
+                reason := "cluster"
+            if reason == "" and selectedBins.size() < shelfCountInput
+                selectedBins.push(boundary)
+                selectedRawRanks.push(rankedPosition + 1)
+                reason := "SELECT"
+            else if reason == ""
+                reason := "rank_limit"
+            rankedReasons.push(reason)
+
+    // ------------------------------------------------------------------------
+    // Raw diagnostic drawings.
+    // ------------------------------------------------------------------------
+
+    if profileValid
+        int histogramWidthMs = int(
+             (profileEndExclusive - profileStartInput) *
+             histogramWidthInput / 100.0)
+        for bin = profileMinBin to profileMaxBin
+            float volumeAtBin = binVolume(profileBins, bin)
+            float relativeWidth = maximumBinVolume > 0.0 ?
+                 volumeAtBin / maximumBinVolume : 0.0
+            float rowCenterPrice = (
+                 GRID_ORIGIN_TICKS + bin * outputTicksInput +
+                 outputTicksInput * 0.5) * syminfo.mintick
+            line histogramLine = line.new(
+                 x1 = profileEndExclusive -
+                      int(histogramWidthMs * relativeWidth),
+                 y1 = rowCenterPrice,
+                 x2 = profileEndExclusive,
+                 y2 = rowCenterPrice,
+                 xloc = xloc.bar_time,
+                 color = color.new(profileColorInput, 65),
+                 width = 2)
+            histogramLines.push(histogramLine)
+
+        pocLine := line.new(
+             profileStartInput, pocPrice,
+             profileEndExclusive, pocPrice,
+             xloc = xloc.bar_time,
+             color = color.new(color.orange, 0),
+             width = 2)
+        valueAreaHighLine := line.new(
+             profileStartInput, valueAreaHighPrice,
+             profileEndExclusive, valueAreaHighPrice,
+             xloc = xloc.bar_time,
+             color = color.new(color.silver, 20),
+             style = line.style_dotted)
+        valueAreaLowLine := line.new(
+             profileStartInput, valueAreaLowPrice,
+             profileEndExclusive, valueAreaLowPrice,
+             xloc = xloc.bar_time,
+             color = color.new(color.silver, 20),
+             style = line.style_dotted)
+
+        int shelfEndTime = extendShelvesInput ? time : profileEndExclusive
+        if selectedBins.size() > 0
+            for selectedPosition = 0 to selectedBins.size() - 1
+                int boundary = selectedBins.get(selectedPosition)
+                int rawIndex = -1
+                for index = 0 to rawBins.size() - 1
+                    if rawBins.get(index) == boundary
+                        rawIndex := index
+                        break
+                if rawIndex >= 0
+                    float price = (
+                         GRID_ORIGIN_TICKS + boundary * outputTicksInput) *
+                         syminfo.mintick
+                    string denseSide = rawDenseSigns.get(rawIndex) > 0 ?
+                         "ABOVE" : rawDenseSigns.get(rawIndex) < 0 ?
+                         "BELOW" : "EVEN"
+                    int transparency = math.min(
+                         70, 5 + selectedPosition * 8)
+                    line shelfLine = line.new(
+                         profileStartInput, price,
+                         shelfEndTime, price,
+                         xloc = xloc.bar_time,
+                         color = color.new(shelfColorInput, transparency),
+                         width = selectedPosition < 2 ? 2 : 1,
+                         style = selectedPosition < 2 ?
+                              line.style_solid : line.style_dashed)
+                    shelfLines.push(shelfLine)
+                    string shelfLabelText =
+                         "S" + str.tostring(selectedPosition + 1) +
+                         " " + str.tostring(price, format.mintick) +
+                         " | " + str.tostring(
+                             rawRatios.get(rawIndex), "#.00") + "x" +
+                         " | C " + str.tostring(
+                             rawClean.get(rawIndex), "#.000") +
+                         " / z " + str.tostring(
+                             rawZ.get(rawIndex), "#.00") +
+                         " | dense " + denseSide +
+                         " | raw rank " +
+                         str.tostring(selectedRawRanks.get(selectedPosition))
+                    label shelfLabel = label.new(
+                         shelfEndTime, price, shelfLabelText,
+                         xloc = xloc.bar_time,
+                         style = label.style_label_left,
+                         color = color.new(color.black, 78),
+                         textcolor = color.new(
+                             shelfColorInput, transparency),
+                         size = size.tiny)
+                    shelfLabels.push(shelfLabel)
+
+    // ------------------------------------------------------------------------
+    // Table and one-time structured logs.
+    // ------------------------------------------------------------------------
+
+    bool rsdInputsMatch = rsdRangeValid and
+         rsdStart == profileStartInput and
+         rsdEndBar == profileEndBarInput
+    string state =
+         profileValid ? "VALID / EXPERIMENTAL" :
+         not chartSupported ? "USE STANDARD 15m CHART" :
+         not inputWindowValid ? "INVALID INPUT RANGE" :
+         not endpointsComplete ? "ENDPOINT COVERAGE FAIL" :
+         missingFootprintCount > 0 ? "MISSING FOOTPRINT" :
+         primitiveIssueCount > 0 ? "PRIMITIVE ROW FAIL" :
+         reconciliationIssueCount > 0 ? "RECONCILIATION FAIL" :
+         sourceArrayIssue ? "SOURCE ARRAY FAIL" :
+         sourceOrderIssue ? "SOURCE ORDER FAIL" :
+         profileOverflow ? "PROFILE CAP FAIL" :
+         "PROFILE ALGORITHM FAIL"
+
+    color headerBg = color.new(#1565c0, 10)
+    color rowBg = color.new(color.black, 20)
+    color warningBg = color.new(#8d6e63, 15)
+    diagnosticRow(diagnosticTable, 0, "VP RSD DIAG 0.2", state, headerBg)
+    diagnosticRow(diagnosticTable, 1, "Source", "1m native footprint", warningBg)
+    diagnosticRow(diagnosticTable, 2, "Input start", timeText(profileStartInput), rowBg)
+    diagnosticRow(diagnosticTable, 3, "Input end incl.", timeText(profileEndBarInput), rowBg)
+    diagnosticRow(diagnosticTable, 4, "RSD suggestion",
+         rsdRangeValid ? rsdSide : "NONE", rowBg)
+    diagnosticRow(diagnosticTable, 5, "RSD start/end",
+         timeText(rsdStart) + " / " + timeText(rsdEndBar), rowBg)
+    diagnosticRow(diagnosticTable, 6, "Inputs match RSD",
+         rsdInputsMatch ? "YES" : "NO", rowBg)
+    diagnosticRow(diagnosticTable, 7, "Minutes / rows",
+         str.tostring(includedMinuteCount) + " / " +
+         str.tostring(includedRowCount), rowBg)
+    diagnosticRow(diagnosticTable, 8, "Defects m/p/r",
+         str.tostring(missingFootprintCount) + " / " +
+         str.tostring(primitiveIssueCount) + " / " +
+         str.tostring(reconciliationIssueCount), rowBg)
+    diagnosticRow(diagnosticTable, 9, "Row size",
+         str.tostring(outputTicksInput) + " ticks = " +
+         str.tostring(outputTicksInput * syminfo.mintick, format.mintick), rowBg)
+    diagnosticRow(diagnosticTable, 10, "Volume / bins",
+         floatText(profileTotalVolume) + " / " +
+         (profileValid ?
+          str.tostring(profileMaxBin - profileMinBin + 1) : "NA"), rowBg)
+    diagnosticRow(diagnosticTable, 11, "POC", str.tostring(pocPrice, format.mintick), rowBg)
+    diagnosticRow(diagnosticTable, 12, "VAL / VAH",
+         str.tostring(valueAreaLowPrice, format.mintick) + " / " +
+         str.tostring(valueAreaHighPrice, format.mintick), rowBg)
+    diagnosticRow(diagnosticTable, 13, "VA achieved",
+         str.tostring(achievedValueAreaPercent, "#.0") + "%", rowBg)
+    diagnosticRow(diagnosticTable, 14, "log eps / C MAD",
+         floatText(logEpsilon) + " / " + floatText(cleanMad), rowBg)
+    diagnosticRow(diagnosticTable, 15, "Gates",
+         applyDiscoveryGatesInput ? "ON (provisional)" : "OFF (raw rank)", rowBg)
+    diagnosticRow(diagnosticTable, 16, "Selected / scanned",
+         str.tostring(selectedBins.size()) + " / " +
+         str.tostring(rankedIndices.size()), rowBg)
+    diagnosticRow(diagnosticTable, 17, "Warning",
+         "Compare native FRVP; no OHLCV fallback", warningBg)
+
+    int tableCandidateRows = math.min(4, selectedBins.size())
+    for tableIndex = 0 to 3
+        string key = "Shelf " + str.tostring(tableIndex + 1)
+        string value = "-"
+        if tableIndex < tableCandidateRows
+            int boundary = selectedBins.get(tableIndex)
+            int rawIndex = -1
+            for index = 0 to rawBins.size() - 1
+                if rawBins.get(index) == boundary
+                    rawIndex := index
+                    break
+            if rawIndex >= 0
+                float price = (
+                     GRID_ORIGIN_TICKS + boundary * outputTicksInput) *
+                     syminfo.mintick
+                value := str.tostring(price, format.mintick) +
+                     " R" + str.tostring(rawRatios.get(rawIndex), "#.00") +
+                     " C" + str.tostring(rawClean.get(rawIndex), "#.000") +
+                     " z" + str.tostring(rawZ.get(rawIndex), "#.00")
+        diagnosticRow(
+             diagnosticTable,
+             18 + tableIndex,
+             key,
+             value,
+             rowBg)
+
+    if not logsEmitted
+        if profileValid
+            log.info(
+                 "VPRS2|kind=profile|state=valid" +
+                 "|start=" + str.tostring(profileStartInput) +
+                 "|end_exclusive=" + str.tostring(profileEndExclusive) +
+                 "|row_ticks=" + str.tostring(outputTicksInput) +
+                 "|minutes=" + str.tostring(includedMinuteCount) +
+                 "|rows=" + str.tostring(includedRowCount) +
+                 "|volume=" + floatText(profileTotalVolume) +
+                 "|poc=" + str.tostring(pocPrice, format.mintick) +
+                 "|val=" + str.tostring(valueAreaLowPrice, format.mintick) +
+                 "|vah=" + str.tostring(valueAreaHighPrice, format.mintick))
+            if rankedIndices.size() > 0
+                for rankedPosition = 0 to rankedIndices.size() - 1
+                    int index = rankedIndices.get(rankedPosition)
+                    int boundary = rawBins.get(index)
+                    float price = (
+                         GRID_ORIGIN_TICKS + boundary * outputTicksInput) *
+                         syminfo.mintick
+                    string denseSide = rawDenseSigns.get(index) > 0 ?
+                         "above" : rawDenseSigns.get(index) < 0 ?
+                         "below" : "even"
+                    log.info(
+                         "VPRS2|kind=shelf" +
+                         "|raw_rank=" + str.tostring(rankedPosition + 1) +
+                         "|price=" + str.tostring(price, format.mintick) +
+                         "|ratio=" + str.tostring(rawRatios.get(index), "#.########") +
+                         "|jump=" + str.tostring(rawJumps.get(index), "#.########") +
+                         "|noise=" + str.tostring(rawNoise.get(index), "#.########") +
+                         "|clean=" + str.tostring(rawClean.get(index), "#.########") +
+                         "|z=" + str.tostring(rawZ.get(index), "#.########") +
+                         "|dense_side=" + denseSide +
+                         "|decision=" + rankedReasons.get(rankedPosition))
+        else
+            log.warning(
+                 "VPRS2|kind=profile|state=invalid" +
+                 "|reason=" + state +
+                 "|start=" + str.tostring(profileStartInput) +
+                 "|end_exclusive=" + str.tostring(profileEndExclusive))
+        logsEmitted := true

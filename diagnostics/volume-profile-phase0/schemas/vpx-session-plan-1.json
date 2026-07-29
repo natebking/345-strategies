@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thestratsuite.local/schemas/vpx-session-plan-1.json",
+  "title": "Volume Profile Phase 0 session matrix plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "matrix_id",
+    "logical_run_prefix",
+    "created_utc",
+    "display_timeframes",
+    "sessions"
+  ],
+  "properties": {
+    "schema": {
+      "const": "vpx.session-plan/1"
+    },
+    "matrix_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "logical_run_prefix": {
+      "$ref": "#/$defs/slug"
+    },
+    "created_utc": {
+      "type": "string",
+      "minLength": 1
+    },
+    "display_timeframes": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          1,
+          5,
+          15,
+          60
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": 1
+          }
+        },
+        {
+          "contains": {
+            "const": 5
+          }
+        },
+        {
+          "contains": {
+            "const": 15
+          }
+        },
+        {
+          "contains": {
+            "const": 60
+          }
+        }
+      ]
+    },
+    "sessions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/session"
+      }
+    }
+  },
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "millisecond": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_key",
+        "warmup_start_ms",
+        "measurement",
+        "manual_profile"
+      ],
+      "properties": {
+        "session_key": {
+          "$ref": "#/$defs/slug"
+        },
+        "warmup_start_ms": {
+          "$ref": "#/$defs/millisecond"
+        },
+        "measurement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "session_id",
+            "start_ms",
+            "end_ms",
+            "bar_anchor_ms"
+          ],
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "start_ms": {
+              "$ref": "#/$defs/millisecond"
+            },
+            "end_ms": {
+              "$ref": "#/$defs/millisecond"
+            },
+            "bar_anchor_ms": {
+              "type": "integer"
+            }
+          }
+        },
+        "manual_profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "start_ms",
+            "end_ms",
+            "expected_minutes"
+          ],
+          "properties": {
+            "start_ms": {
+              "$ref": "#/$defs/millisecond"
+            },
+            "end_ms": {
+              "$ref": "#/$defs/millisecond"
+            },
+            "expected_minutes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

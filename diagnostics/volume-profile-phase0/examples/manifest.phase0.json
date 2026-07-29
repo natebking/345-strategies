@@ -1,0 +1,185 @@
+{
+  "schema": "vpx.logical-run/1",
+  "example_only": true,
+  "example_notes": [
+    "Replace the symbol/contract and verify the exact TradingView CSV column headers before a real run.",
+    "Changing any Pine setting or chart-state field requires recalculating its canonical SHA-256 hash and normally a new logical_run_id."
+  ],
+  "experiment_id": "VP0-GRID-1",
+  "logical_run_id": "vp0-grid-1-esu2026-20260724-5m-r4-va70",
+  "logical_run_token": 701240504,
+  "configuration_token": 704700001,
+  "created_utc": "2026-07-25T14:00:00Z",
+  "code": {
+    "script_build": "Volume Profile Phase 0 Probe v0.1.0",
+    "script_version": "0.1.0",
+    "source_sha256": "331bf9d3c8a824ad6dea2e0138b2db3178e6948a3cc23b27b9221beddbb32796",
+    "wire_schema": 1
+  },
+  "pine_settings": {
+    "grid_origin_ticks": 0,
+    "manual_end_ms": 1784837700000,
+    "manual_expected_minutes": 405,
+    "manual_start_ms": 1784813400000,
+    "max_profile_bins": 2048,
+    "measurement_end_ms": 1784924100000,
+    "measurement_start_ms": 1784899800000,
+    "output_ticks": 4,
+    "poc_algorithm": "max_nearest_weighted_mean_lower",
+    "primitive_ticks": 1,
+    "prior_rth_selection": "latest_complete_end_lte_measurement_start",
+    "profile_fp_algo": "fold31_v1",
+    "row_mapping_algorithm": "midpoint_round_tick_floor_global",
+    "rth_expected_minutes": 405,
+    "rth_session": "0830-1515:23456",
+    "rth_timezone": "America/Chicago",
+    "source_timeframe": "1",
+    "value_area_algorithm": "contiguous_larger_nearer_upper_no_overshoot",
+    "value_area_percent": 70.0,
+    "volume_scale": 1000
+  },
+  "pine_settings_hash": "264c60f287e7117bdd046026bbf2e3b98c498e506078c5499c491218780fd44a",
+  "chart_state": {
+    "adjustment": "none",
+    "calculation_timeframe": "1",
+    "chart_timeframe": "5",
+    "chart_type": "standard",
+    "contract": "ESU2026",
+    "display_timezone": "America/Chicago",
+    "locale": "en-US",
+    "session_mode": "eth",
+    "session_ui_label": "Electronic trading hours",
+    "symbol": "CME_MINI:ESU2026"
+  },
+  "chart_state_hash": "79943ab0a07e245947ae956c199fffe3d40bdc2d0e3cdb600a91e2920b94dad0",
+  "market": {
+    "exchange_timezone": "America/Chicago",
+    "minimum_tick": 0.25,
+    "profile_instrument": "ESU2026",
+    "standard_time_chart_required": true
+  },
+  "window": {
+    "warmup_start_ms": 1784813400000,
+    "measurement_start_ms": 1784899800000,
+    "measurement_end_ms": 1784924100000,
+    "expected_sessions": [
+      {
+        "session_id": "ESU2026-RTH-2026-07-24",
+        "start_ms": 1784899800000,
+        "end_ms": 1784924100000,
+        "bar_ms": 300000,
+        "expected_count": 81
+      }
+    ]
+  },
+  "chart_csv": {
+    "time_column": "time",
+    "time_format": "iso8601",
+    "identity_columns": {
+      "logical_run_token": "VPX.Run",
+      "attempt_token": "VPX.Attempt",
+      "configuration_token": "VPX.Config"
+    },
+    "value_columns": {
+      "VPX.PriorRTH.POC": {
+        "nullable": true,
+        "integral": true
+      },
+      "VPX.PriorRTH.VAH": {
+        "nullable": true,
+        "integral": true
+      },
+      "VPX.PriorRTH.VAL": {
+        "nullable": true,
+        "integral": true
+      },
+      "VPX.Manual.POC": {
+        "nullable": true,
+        "integral": true
+      },
+      "VPX.Manual.VAH": {
+        "nullable": true,
+        "integral": true
+      },
+      "VPX.Manual.VAL": {
+        "nullable": true,
+        "integral": true
+      },
+      "VPX.ChartCount": {
+        "nullable": true,
+        "integral": true
+      },
+      "VPX.ChartFP": {
+        "nullable": true,
+        "integral": true
+      },
+      "VPX.ProfileCount": {
+        "nullable": true,
+        "integral": true
+      },
+      "VPX.ProfileFP": {
+        "nullable": true,
+        "integral": true
+      },
+      "VPX.ErrorMask": {
+        "nullable": false,
+        "integral": true
+      },
+      "VPX.Terminal": {
+        "nullable": false,
+        "integral": true
+      }
+    },
+    "overlap_groups": [
+      {
+        "record_kind": "PROFILE",
+        "match": {
+          "family": "PRIOR_RTH"
+        },
+        "start_field": "effective_start_ms",
+        "end_field": "effective_end_ms",
+        "fields": {
+          "poc_ticks": "VPX.PriorRTH.POC",
+          "vah_ticks": "VPX.PriorRTH.VAH",
+          "val_ticks": "VPX.PriorRTH.VAL"
+        }
+      },
+      {
+        "record_kind": "PROFILE",
+        "match": {
+          "family": "MANUAL"
+        },
+        "start_field": "effective_start_ms",
+        "end_field": "effective_end_ms",
+        "fields": {
+          "poc_ticks": "VPX.Manual.POC",
+          "vah_ticks": "VPX.Manual.VAH",
+          "val_ticks": "VPX.Manual.VAL"
+        }
+      }
+    ],
+    "source_columns": {
+      "chart_count": "VPX.ChartCount",
+      "chart_fp": "VPX.ChartFP",
+      "profile_count": "VPX.ProfileCount",
+      "profile_fp": "VPX.ProfileFP",
+      "error_mask": "VPX.ErrorMask"
+    },
+    "terminal_column": "VPX.Terminal",
+    "na_values": [
+      "",
+      "NaN",
+      "na"
+    ]
+  },
+  "outputs": {
+    "max_historical_log_records": 8000,
+    "required_log_kinds": [
+      "RUN_BEGIN",
+      "CONFIG",
+      "PROFILE",
+      "RUN_END"
+    ],
+    "visible_chart_objects": 0
+  }
+}

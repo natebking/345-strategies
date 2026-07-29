@@ -1,0 +1,3141 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// at https://mozilla.org/MPL/2.0/
+// © 2026 TheStratSuite contributors
+//@version=6
+
+// RESEARCH DIAGNOSTIC ONLY.
+//
+// This variant keeps the v0.4 multi-resolution construction and adds a local
+// paired-node test. Every retained boundary keeps the direction of its dense
+// side. Starting at that anchor, each grid scans outward on the dense side and
+// accepts the nearest material local maximum in opposite-direction clean
+// strength that encloses a local volume bulge. The local-maximum test prevents
+// tiny ripples inside one transition from becoming edges. A width cap prevents
+// a local edge from swallowing a broad composite distribution. A node is drawn
+// only when the base-grid pair is complete and at least one neighboring grid
+// agrees on direction and both endpoints.
+//
+//   fine   = round(base row ticks * 0.8)
+//   base   = base row ticks
+//   coarse = round(base row ticks * 1.2)
+//
+// Each profile allocates every source bar's total volume by exact high/low tick
+// overlap. The existing provisional local log-jump gates are applied to each
+// grid independently. Anchor clustering keeps its configurable radius, while
+// mate endpoints use the stricter fixed radius of one base row. Neighbor grids
+// are evaluated pair-aware instead of inheriting the preselected standalone
+// neighbor. Stable pairs rank by grid support, worst cross-grid node prominence,
+// then the minimum anchor z score. Unpaired consensus anchors remain eligible
+// as standalones. A selected pair consumes consensus anchors inside the node or
+// within one consensus radius of either edge.
+//
+// Optional structural bounds can suppress otherwise-valid consensus shelves
+// that are too close to the RSD range low or high. They are suppression inputs,
+// not additional evidence.
+//
+// Endpoint contract:
+//   [Start 15m bar time, End 15m bar time + 15 minutes)
+//
+// This script does not create entries, exits, or support/resistance claims.
+// It tests whether both edges of a volume node survive row-size perturbation.
+indicator(
+     "VP RSD Local Node Edge Consensus Diagnostic v0.5.1",
+     shorttitle = "VP RSD LOCAL 0.5.1",
+     overlay = true,
+     max_bars_back = 5000,
+     max_lines_count = 500,
+     max_boxes_count = 10,
+     max_labels_count = 100)
+
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+string rangeGroup = "1. Immutable RSD range (15m chart time)"
+int profileStartInput = input.time(
+     timestamp("23 Jun 2026 12:45 -0700"),
+     "Start swing bar",
+     group = rangeGroup)
+int profileEndBarInput = input.time(
+     timestamp("14 Jul 2026 06:30 -0700"),
+     "End swing bar (included)",
+     group = rangeGroup)
+
+string constructionGroup = "2. Multi-resolution construction"
+int baseTicksInput = input.int(
+     10,
+     "Base ticks per row",
+     minval = 1,
+     maxval = 500,
+     group = constructionGroup,
+     tooltip = "The other grids are round(base × 0.8) and round(base × 1.2). All three rounded sizes must be positive and distinct.")
+float valueAreaPercentInput = input.float(
+     70.0,
+     "Base-grid Value Area target (%)",
+     minval = 1.0,
+     maxval = 100.0,
+     step = 0.5,
+     group = constructionGroup)
+
+string scoringGroup = "3. Provisional local geometry gates"
+int candidateCapPerGridInput = input.int(
+     12,
+     "Candidate cap per grid",
+     minval = 1,
+     maxval = 20,
+     group = scoringGroup)
+float minimumRatioInput = input.float(
+     1.75,
+     "Minimum dense/thin ratio",
+     minval = 1.0,
+     step = 0.05,
+     group = scoringGroup)
+float maximumNoiseFractionInput = input.float(
+     0.50,
+     "Maximum W / J",
+     minval = 0.0,
+     step = 0.05,
+     group = scoringGroup)
+float minimumDenseFractionInput = input.float(
+     0.20,
+     "Minimum dense side / grid max row",
+     minval = 0.0,
+     maxval = 1.0,
+     step = 0.05,
+     group = scoringGroup)
+float minimumRobustZInput = input.float(
+     2.50,
+     "Minimum robust z",
+     minval = 0.0,
+     step = 0.25,
+     group = scoringGroup)
+int localClusterRowsInput = input.int(
+     2,
+     "Within-grid cluster radius (grid rows)",
+     minval = 0,
+     maxval = 10,
+     group = scoringGroup)
+
+string consensusGroup = "4. Cross-grid consensus"
+float consensusClusterBaseRowsInput = input.float(
+     1.0,
+     "Cross-grid cluster radius (base rows)",
+     minval = 0.25,
+     maxval = 5.0,
+     step = 0.25,
+     group = consensusGroup)
+int maximumStructuresInput = input.int(
+     2,
+     "Maximum structures",
+     minval = 1,
+     maxval = 2,
+     group = consensusGroup)
+float maximumNodeWidthBaseRowsInput = input.float(
+     12.0,
+     "Maximum paired-node width (base rows)",
+     minval = 3.0,
+     maxval = 50.0,
+     step = 0.5,
+     group = consensusGroup,
+     tooltip = "Local-node guard. A mate farther than this is not paired with the anchor; the anchor may remain a standalone shelf.")
+bool extendStructuresInput = input.bool(
+     true,
+     "Extend structures to current bar",
+     group = consensusGroup)
+
+string structureGroup = "5. Optional structural-bound suppression"
+bool useStructuralBoundsInput = input.bool(
+     false,
+     "Suppress near structural low / high",
+     group = structureGroup)
+float structuralLowInput = input.price(
+     0.0,
+     "Structural low",
+     group = structureGroup)
+float structuralHighInput = input.price(
+     0.0,
+     "Structural high",
+     group = structureGroup)
+float structuralDistanceBaseRowsInput = input.float(
+     1.0,
+     "Suppression distance (base rows)",
+     minval = 0.0,
+     maxval = 20.0,
+     step = 0.25,
+     group = structureGroup)
+
+string displayGroup = "6. Diagnostic display"
+float histogramWidthInput = input.float(
+     24.0,
+     "Base histogram width (% of range)",
+     minval = 5.0,
+     maxval = 50.0,
+     group = displayGroup)
+color rangeColorInput = input.color(
+     #26c6da,
+     "Range / base histogram",
+     group = displayGroup)
+color consensusColorInput = input.color(
+     #ffd54f,
+     "Consensus structures",
+     group = displayGroup)
+
+
+// ============================================================================
+// CONSTANTS AND HELPERS
+// ============================================================================
+
+const int MINUTE_MS = 60000
+const int PROFILE_BAR_MS = 15 * MINUTE_MS
+const int SOURCE_BAR_MS = 15 * MINUTE_MS
+const string SOURCE_TIMEFRAME = "15"
+const int GRID_ORIGIN_TICKS = 0
+const int MAX_PROFILE_BINS = 400
+const int SHELF_SIDE_ROWS = 3
+const int MIN_NODE_ROWS = 3
+const float MIN_MATE_TO_ANCHOR_CLEAN = 0.10
+const int MAX_RANKED_DIAGNOSTICS = 60
+const int MIN_CONSENSUS_GRIDS = 2
+
+int profileEndExclusive = profileEndBarInput + PROFILE_BAR_MS
+int fineTicks = math.max(
+     1,
+     int(math.round(baseTicksInput * 0.8)))
+int coarseTicks = math.max(
+     1,
+     int(math.round(baseTicksInput * 1.2)))
+bool gridConfigurationValid =
+     fineTicks > 0 and
+     baseTicksInput > 0 and
+     coarseTicks > 0 and
+     fineTicks != baseTicksInput and
+     fineTicks != coarseTicks and
+     baseTicksInput != coarseTicks
+
+priceToTicks(float price) =>
+    na(price) ? na : int(math.round(price / syminfo.mintick))
+
+binVolume(map<int, float> bins, int bin) =>
+    bins.contains(bin) ? bins.get(bin) : 0.0
+
+median3(float a, float b, float c) =>
+    a + b + c -
+     math.min(a, math.min(b, c)) -
+     math.max(a, math.max(b, c))
+
+mad3(float a, float b, float c, float center) =>
+    median3(
+         math.abs(a - center),
+         math.abs(b - center),
+         math.abs(c - center))
+
+medianSorted(array<float> values) =>
+    int count = values.size()
+    float result = na
+    if count > 0
+        int middle = int(math.floor(count / 2.0))
+        result := count % 2 == 1 ?
+             values.get(middle) :
+             math.avg(
+                 values.get(middle - 1),
+                 values.get(middle))
+    result
+
+timeText(int value) =>
+    na(value) ? "NA" :
+     str.format_time(
+         value,
+         "yyyy-MM-dd HH:mm",
+         syminfo.timezone)
+
+floatText(float value) =>
+    na(value) ? "NA" :
+     str.tostring(value, "#.########")
+
+clearLines(array<line> drawings) =>
+    int count = drawings.size()
+    if count > 0
+        for index = 0 to count - 1
+            line.delete(drawings.get(index))
+    drawings.clear()
+
+clearLabels(array<label> drawings) =>
+    int count = drawings.size()
+    if count > 0
+        for index = 0 to count - 1
+            label.delete(drawings.get(index))
+    drawings.clear()
+
+diagnosticRow(
+     table target,
+     int row,
+     string key,
+     string value,
+     color background) =>
+    table.cell(
+         target,
+         0,
+         row,
+         key,
+         text_color = color.silver,
+         text_size = size.tiny,
+         bgcolor = background,
+         text_halign = text.align_left)
+    table.cell(
+         target,
+         1,
+         row,
+         value,
+         text_color = color.white,
+         text_size = size.tiny,
+         bgcolor = background,
+         text_halign = text.align_left)
+
+boundedPut(
+     map<int, float> bins,
+     int key,
+     float addedVolume,
+     int currentMin,
+     int currentMax) =>
+    bool alreadyPresent = bins.contains(key)
+    int candidateMin = na(currentMin) ?
+         key : math.min(currentMin, key)
+    int candidateMax = na(currentMax) ?
+         key : math.max(currentMax, key)
+    bool overflow =
+         candidateMax - candidateMin + 1 >
+          MAX_PROFILE_BINS or
+         (not alreadyPresent and
+          bins.size() >= MAX_PROFILE_BINS)
+    int nextMin = currentMin
+    int nextMax = currentMax
+    if not overflow
+        bins.put(
+             key,
+             binVolume(bins, key) + addedVolume)
+        nextMin := candidateMin
+        nextMax := candidateMax
+    [nextMin, nextMax, overflow]
+
+betterConsensusCombination(
+     int support,
+     float minimumZ,
+     int totalDistance,
+     int incumbentSupport,
+     float incumbentMinimumZ,
+     int incumbentDistance) =>
+    support > incumbentSupport or
+     (
+         support == incumbentSupport and
+         minimumZ > incumbentMinimumZ) or
+     (
+         support == incumbentSupport and
+         minimumZ == incumbentMinimumZ and
+         totalDistance < incumbentDistance)
+
+calculateProfile(
+     map<int, float> bins,
+     int minBin,
+     int maxBin,
+     float totalVolume,
+     int rowTicks) =>
+    bool valid =
+         not na(minBin) and
+         not na(maxBin) and
+         maxBin >= minBin and
+         maxBin - minBin + 1 <= MAX_PROFILE_BINS and
+         bins.size() > 0 and
+         totalVolume > 0.0
+    int pocBin = na
+    int valueAreaLowBin = na
+    int valueAreaHighBin = na
+    float achievedPercent = na
+    float maximumVolume = na
+
+    if valid
+        float weightedCenter2 = 0.0
+        for bin = minBin to maxBin
+            float volumeAtBin = binVolume(bins, bin)
+            int center2 =
+                 2 * (
+                     GRID_ORIGIN_TICKS +
+                     bin * rowTicks) +
+                 rowTicks
+            weightedCenter2 +=
+                 volumeAtBin * center2
+            maximumVolume := na(maximumVolume) ?
+                 volumeAtBin :
+                 math.max(
+                     maximumVolume,
+                     volumeAtBin)
+
+        float meanCenter2 =
+             weightedCenter2 / totalVolume
+        float bestDistance = na
+        float tieTolerance = math.max(
+             0.000000001,
+             math.abs(maximumVolume) *
+              0.000000000001)
+        for bin = minBin to maxBin
+            float volumeAtBin =
+                 binVolume(bins, bin)
+            if math.abs(
+                 volumeAtBin -
+                 maximumVolume) <= tieTolerance
+                int center2 =
+                     2 * (
+                         GRID_ORIGIN_TICKS +
+                         bin * rowTicks) +
+                     rowTicks
+                float distance =
+                     math.abs(center2 - meanCenter2)
+                if na(bestDistance) or
+                 distance <
+                  bestDistance - 0.000000001 or
+                 (math.abs(
+                      distance -
+                      bestDistance) <=
+                   0.000000001 and
+                  bin < pocBin)
+                    pocBin := bin
+                    bestDistance := distance
+
+        if not na(pocBin)
+            valueAreaLowBin := pocBin
+            valueAreaHighBin := pocBin
+            float includedVolume =
+                 binVolume(bins, pocBin)
+            float targetVolume =
+                 totalVolume *
+                 valueAreaPercentInput /
+                 100.0
+            float tolerance = math.max(
+                 0.000000001,
+                 math.abs(totalVolume) *
+                  0.000000000001)
+            int steps = 0
+            while includedVolume <
+             targetVolume - tolerance and
+             steps < MAX_PROFILE_BINS
+                bool hasLower =
+                     valueAreaLowBin > minBin
+                bool hasUpper =
+                     valueAreaHighBin < maxBin
+                if not hasLower and not hasUpper
+                    break
+                int lowerCandidate =
+                     valueAreaLowBin - 1
+                int upperCandidate =
+                     valueAreaHighBin + 1
+                float lowerVolume = hasLower ?
+                     binVolume(
+                         bins,
+                         lowerCandidate) : na
+                float upperVolume = hasUpper ?
+                     binVolume(
+                         bins,
+                         upperCandidate) : na
+                bool chooseUpper = not hasLower
+                if hasLower and hasUpper
+                    chooseUpper :=
+                         upperVolume >
+                          lowerVolume or
+                         (upperVolume ==
+                           lowerVolume and
+                          math.abs(
+                              upperCandidate -
+                              pocBin) <=
+                           math.abs(
+                               lowerCandidate -
+                               pocBin))
+                float selectedVolume =
+                     chooseUpper ?
+                     upperVolume : lowerVolume
+                if includedVolume +
+                 selectedVolume >
+                 targetVolume + tolerance
+                    break
+                if chooseUpper
+                    valueAreaHighBin :=
+                         upperCandidate
+                else
+                    valueAreaLowBin :=
+                         lowerCandidate
+                includedVolume += selectedVolume
+                steps += 1
+            achievedPercent :=
+                 includedVolume /
+                 totalVolume *
+                 100.0
+
+    [valid and not na(pocBin),
+     pocBin,
+     valueAreaLowBin,
+     valueAreaHighBin,
+     achievedPercent,
+     maximumVolume]
+
+scoreGatedCandidates(
+     map<int, float> bins,
+     int minBin,
+     int maxBin,
+     int rowTicks,
+     float maximumVolume,
+     float minimumRatio,
+     float maximumNoiseFraction,
+     float minimumDenseFraction,
+     float minimumRobustZ,
+     int localClusterRows,
+     int candidateCap) =>
+    array<int> rawBins = array.new_int()
+    array<float> rawJumps = array.new_float()
+    array<float> rawNoise = array.new_float()
+    array<float> rawClean = array.new_float()
+    array<float> rawRatios = array.new_float()
+    array<float> rawDenseVolumes =
+         array.new_float()
+    array<float> rawZ = array.new_float()
+    array<int> rawDenseDirections =
+         array.new_int()
+    array<float> positiveVolumes =
+         array.new_float()
+    array<int> selectedTicks = array.new_int()
+    array<float> selectedClean =
+         array.new_float()
+    array<float> selectedZ =
+         array.new_float()
+    array<int> selectedDenseDirections =
+         array.new_int()
+    float cleanMad = na
+
+    if not na(minBin) and
+     not na(maxBin) and
+     not na(maximumVolume) and
+     maximumVolume > 0.0
+        for bin = minBin to maxBin
+            float volumeAtBin =
+                 binVolume(bins, bin)
+            if volumeAtBin > 0.0
+                positiveVolumes.push(
+                     volumeAtBin)
+        positiveVolumes.sort(order.ascending)
+        float logEpsilon =
+             positiveVolumes.size() > 0 ?
+             math.max(
+                 medianSorted(
+                     positiveVolumes) *
+                  0.01,
+                 0.000000001) : na
+
+        int firstBoundary =
+             minBin + SHELF_SIDE_ROWS
+        int lastBoundary =
+             maxBin - SHELF_SIDE_ROWS + 1
+        if not na(logEpsilon) and
+         firstBoundary <= lastBoundary
+            for boundary =
+             firstBoundary to lastBoundary
+                float l0 = math.log(
+                     binVolume(
+                         bins,
+                         boundary - 3) +
+                     logEpsilon)
+                float l1 = math.log(
+                     binVolume(
+                         bins,
+                         boundary - 2) +
+                     logEpsilon)
+                float l2 = math.log(
+                     binVolume(
+                         bins,
+                         boundary - 1) +
+                     logEpsilon)
+                float r0 = math.log(
+                     binVolume(
+                         bins,
+                         boundary) +
+                     logEpsilon)
+                float r1 = math.log(
+                     binVolume(
+                         bins,
+                         boundary + 1) +
+                     logEpsilon)
+                float r2 = math.log(
+                     binVolume(
+                         bins,
+                         boundary + 2) +
+                     logEpsilon)
+                float leftMedian =
+                     median3(l0, l1, l2)
+                float rightMedian =
+                     median3(r0, r1, r2)
+                float jump = math.abs(
+                     rightMedian -
+                     leftMedian)
+                float noise =
+                     mad3(
+                         l0,
+                         l1,
+                         l2,
+                         leftMedian) +
+                     mad3(
+                         r0,
+                         r1,
+                         r2,
+                         rightMedian)
+                float cleanJump =
+                     math.max(
+                         0.0,
+                         jump - noise)
+                float denseVolume =
+                     math.max(
+                         0.0,
+                         math.exp(
+                             math.max(
+                                 leftMedian,
+                                 rightMedian)) -
+                         logEpsilon)
+                rawBins.push(boundary)
+                rawJumps.push(jump)
+                rawNoise.push(noise)
+                rawClean.push(cleanJump)
+                rawRatios.push(
+                     math.exp(jump))
+                rawDenseVolumes.push(
+                     denseVolume)
+                rawDenseDirections.push(
+                     rightMedian >
+                      leftMedian ? 1 : -1)
+
+        if rawClean.size() > 0
+            array<float> cleanSorted =
+                 rawClean.copy()
+            cleanSorted.sort(order.ascending)
+            float cleanMedian =
+                 medianSorted(cleanSorted)
+            array<float> deviations =
+                 array.new_float()
+            for index =
+             0 to rawClean.size() - 1
+                deviations.push(
+                     math.abs(
+                         rawClean.get(index) -
+                         cleanMedian))
+            deviations.sort(order.ascending)
+            cleanMad :=
+                 medianSorted(deviations)
+            float robustScale =
+                 math.max(
+                     1.4826 * cleanMad,
+                     0.000000001)
+            for index =
+             0 to rawClean.size() - 1
+                rawZ.push(
+                     (
+                         rawClean.get(index) -
+                         cleanMedian) /
+                     robustScale)
+
+    array<int> rankedIndices =
+         array.new_int()
+    array<bool> consumed =
+         array.new_bool(
+             rawClean.size(),
+             false)
+    int rankLimit = math.min(
+         rawClean.size(),
+         MAX_RANKED_DIAGNOSTICS)
+    if rankLimit > 0
+        for rank = 0 to rankLimit - 1
+            int bestIndex = -1
+            float bestClean = na
+            int bestBoundary = na
+            for index =
+             0 to rawClean.size() - 1
+                if not consumed.get(index)
+                    float candidateClean =
+                         rawClean.get(index)
+                    int candidateBoundary =
+                         rawBins.get(index)
+                    if na(bestClean) or
+                     candidateClean > bestClean or
+                     (candidateClean ==
+                       bestClean and
+                      candidateBoundary <
+                       bestBoundary)
+                        bestIndex := index
+                        bestClean :=
+                             candidateClean
+                        bestBoundary :=
+                             candidateBoundary
+            if bestIndex >= 0
+                consumed.set(
+                     bestIndex,
+                     true)
+                rankedIndices.push(
+                     bestIndex)
+
+    if rankedIndices.size() > 0
+        for rankedPosition =
+         0 to rankedIndices.size() - 1
+            int index =
+                 rankedIndices.get(
+                     rankedPosition)
+            bool passes =
+                 rawRatios.get(index) >=
+                  minimumRatio and
+                 rawNoise.get(index) <=
+                  maximumNoiseFraction *
+                  rawJumps.get(index) and
+                 rawDenseVolumes.get(index) >=
+                  minimumDenseFraction *
+                  maximumVolume and
+                 rawZ.get(index) >=
+                  minimumRobustZ
+            int boundary =
+                 rawBins.get(index)
+            bool clustered = false
+            if passes and
+             selectedTicks.size() > 0
+                for selectedIndex =
+                 0 to selectedTicks.size() - 1
+                    int selectedBoundary =
+                         int(math.round(
+                             selectedTicks.get(
+                                 selectedIndex) /
+                             float(rowTicks)))
+                    if math.abs(
+                         boundary -
+                         selectedBoundary) <=
+                         localClusterRows
+                        clustered := true
+                        break
+            if passes and
+             not clustered and
+             selectedTicks.size() <
+              candidateCap
+                selectedTicks.push(
+                     GRID_ORIGIN_TICKS +
+                     boundary * rowTicks)
+                selectedClean.push(
+                     rawClean.get(index))
+                selectedZ.push(
+                     rawZ.get(index))
+                selectedDenseDirections.push(
+                     rawDenseDirections.get(
+                         index))
+
+    [selectedTicks,
+     selectedClean,
+     selectedZ,
+     selectedDenseDirections,
+     rawClean.size(),
+     cleanMad]
+
+profileLogEpsilon(
+     map<int, float> bins,
+     int minBin,
+     int maxBin) =>
+    array<float> positiveVolumes =
+         array.new_float()
+    if not na(minBin) and
+     not na(maxBin) and
+     minBin <= maxBin
+        for bin = minBin to maxBin
+            float volumeAtBin =
+                 binVolume(bins, bin)
+            if volumeAtBin > 0.0
+                positiveVolumes.push(
+                     volumeAtBin)
+    positiveVolumes.sort(order.ascending)
+    positiveVolumes.size() > 0 ?
+     math.max(
+         medianSorted(
+             positiveVolumes) *
+          0.01,
+         0.000000001) : na
+
+boundaryGeometry(
+     map<int, float> bins,
+     int boundary,
+     float logEpsilon) =>
+    float l0 = math.log(
+         binVolume(
+             bins,
+             boundary - 3) +
+         logEpsilon)
+    float l1 = math.log(
+         binVolume(
+             bins,
+             boundary - 2) +
+         logEpsilon)
+    float l2 = math.log(
+         binVolume(
+             bins,
+             boundary - 1) +
+         logEpsilon)
+    float r0 = math.log(
+         binVolume(
+             bins,
+             boundary) +
+         logEpsilon)
+    float r1 = math.log(
+         binVolume(
+             bins,
+             boundary + 1) +
+         logEpsilon)
+    float r2 = math.log(
+         binVolume(
+             bins,
+             boundary + 2) +
+         logEpsilon)
+    float leftMedian =
+         median3(l0, l1, l2)
+    float rightMedian =
+         median3(r0, r1, r2)
+    float jump = math.abs(
+         rightMedian -
+         leftMedian)
+    float noise =
+         mad3(
+             l0,
+             l1,
+             l2,
+             leftMedian) +
+         mad3(
+             r0,
+             r1,
+             r2,
+             rightMedian)
+    float clean =
+         math.max(
+             0.0,
+             jump - noise)
+    int denseDirection =
+         rightMedian >
+          leftMedian ? 1 : -1
+    [leftMedian,
+     rightMedian,
+     clean,
+     denseDirection]
+
+smoothedLogVolume(
+     map<int, float> bins,
+     int row,
+     float logEpsilon) =>
+    median3(
+         math.log(
+             binVolume(
+                 bins,
+                 row - 1) +
+             logEpsilon),
+         math.log(
+             binVolume(
+                 bins,
+                 row) +
+             logEpsilon),
+         math.log(
+             binVolume(
+                 bins,
+                 row + 1) +
+             logEpsilon))
+
+traceNodeMate(
+     map<int, float> bins,
+     int minBin,
+     int maxBin,
+     int rowTicks,
+     int anchorTick,
+     int retainedDenseDirection,
+     float maximumWidthTicks,
+     float logEpsilon) =>
+    bool pairValid = false
+    int mateTick = na
+    float prominence = na
+    int widthRows = 0
+    int boundary = int(math.round(
+         (
+             anchorTick -
+             GRID_ORIGIN_TICKS) /
+         float(rowTicks)))
+    int firstBoundary =
+         minBin + SHELF_SIDE_ROWS
+    int lastBoundary =
+         maxBin - SHELF_SIDE_ROWS + 1
+    int maximumWidthRows =
+         math.max(
+             MIN_NODE_ROWS,
+             int(math.floor(
+                 maximumWidthTicks /
+                 rowTicks)))
+
+    if not na(logEpsilon) and
+     (
+         retainedDenseDirection == 1 or
+         retainedDenseDirection == -1) and
+     boundary >= firstBoundary and
+     boundary <= lastBoundary
+        [anchorLeft,
+         anchorRight,
+         anchorClean,
+         anchorDirection] =
+             boundaryGeometry(
+                 bins,
+                 boundary,
+                 logEpsilon)
+        float thinAnchor =
+             retainedDenseDirection == 1 ?
+             anchorLeft :
+             anchorRight
+        float denseAnchor =
+             retainedDenseDirection == 1 ?
+             anchorRight :
+             anchorLeft
+        int firstDenseRow =
+             retainedDenseDirection == 1 ?
+             boundary :
+             boundary - 1
+        bool anchorConsistent =
+             anchorClean > 0.0 and
+             anchorDirection ==
+              retainedDenseDirection and
+             denseAnchor >
+              thinAnchor and
+             smoothedLogVolume(
+                 bins,
+                 firstDenseRow,
+                 logEpsilon) >=
+              thinAnchor
+
+        if anchorConsistent
+            int candidateWidth =
+                 MIN_NODE_ROWS
+            bool searching = true
+            while searching and
+             candidateWidth <=
+              maximumWidthRows
+                int exitBoundary =
+                     boundary +
+                     retainedDenseDirection *
+                      candidateWidth
+                int nearBoundary =
+                     boundary +
+                     retainedDenseDirection *
+                      (
+                          candidateWidth -
+                          1)
+                int farBoundary =
+                     boundary +
+                     retainedDenseDirection *
+                      (
+                          candidateWidth +
+                          1)
+                bool tripletHasContext =
+                     nearBoundary >=
+                      firstBoundary and
+                     nearBoundary <=
+                      lastBoundary and
+                     exitBoundary >=
+                      firstBoundary and
+                     exitBoundary <=
+                      lastBoundary and
+                     farBoundary >=
+                      firstBoundary and
+                     farBoundary <=
+                      lastBoundary
+                if not tripletHasContext
+                    searching := false
+                else
+                    [nearLeft,
+                     nearRight,
+                     nearClean,
+                     nearDenseDirection] =
+                         boundaryGeometry(
+                             bins,
+                             nearBoundary,
+                             logEpsilon)
+                    [exitLeft,
+                     exitRight,
+                     exitClean,
+                     exitDenseDirection] =
+                         boundaryGeometry(
+                             bins,
+                             exitBoundary,
+                             logEpsilon)
+                    [farLeft,
+                     farRight,
+                     farClean,
+                     farDenseDirection] =
+                         boundaryGeometry(
+                             bins,
+                             farBoundary,
+                             logEpsilon)
+                    float nearOppositeClean =
+                         nearDenseDirection ==
+                          -retainedDenseDirection ?
+                         nearClean : 0.0
+                    float exitOppositeClean =
+                         exitDenseDirection ==
+                          -retainedDenseDirection ?
+                         exitClean : 0.0
+                    float farOppositeClean =
+                         farDenseDirection ==
+                          -retainedDenseDirection ?
+                         farClean : 0.0
+                    bool localOppositePeak =
+                         exitOppositeClean >=
+                          anchorClean *
+                           MIN_MATE_TO_ANCHOR_CLEAN and
+                         exitOppositeClean >=
+                          nearOppositeClean and
+                         exitOppositeClean >=
+                          farOppositeClean and
+                         (
+                             exitOppositeClean >
+                              nearOppositeClean or
+                             exitOppositeClean >
+                              farOppositeClean) and
+                         exitDenseDirection ==
+                          -retainedDenseDirection
+                    if localOppositePeak
+                        // The nearest material peak owns the local decision.
+                        // If it does not enclose a bulge, do not jump across it
+                        // to manufacture a broader composite pair.
+                        searching := false
+                        array<float> interior =
+                             array.new_float()
+                        for interiorIndex =
+                         0 to candidateWidth - 1
+                            int interiorRow =
+                                 firstDenseRow +
+                                 retainedDenseDirection *
+                                  interiorIndex
+                            interior.push(
+                                 smoothedLogVolume(
+                                     bins,
+                                     interiorRow,
+                                     logEpsilon))
+                        interior.sort(
+                             order.ascending)
+                        float interiorMedian =
+                             medianSorted(interior)
+                        float mateExterior =
+                             retainedDenseDirection == 1 ?
+                             exitRight :
+                             exitLeft
+                        float localProminence =
+                             interiorMedian -
+                             math.max(
+                                 thinAnchor,
+                                 mateExterior)
+                        if localProminence > 0.0
+                            pairValid := true
+                            mateTick :=
+                                 GRID_ORIGIN_TICKS +
+                                 exitBoundary *
+                                  rowTicks
+                            prominence :=
+                                 localProminence
+                            widthRows :=
+                                 candidateWidth
+                    candidateWidth += 1
+
+    [pairValid,
+     mateTick,
+     prominence,
+     widthRows]
+
+betterNode(
+     int support,
+     float worstProminence,
+     float minimumZ,
+     int incumbentSupport,
+     float incumbentWorstProminence,
+     float incumbentMinimumZ) =>
+    support > incumbentSupport or
+     (
+         support == incumbentSupport and
+         (
+             na(incumbentWorstProminence) or
+             worstProminence >
+              incumbentWorstProminence)) or
+     (
+         support == incumbentSupport and
+         worstProminence ==
+          incumbentWorstProminence and
+         (
+             na(incumbentMinimumZ) or
+             minimumZ >
+              incumbentMinimumZ))
+
+
+// ============================================================================
+// FIXED 15-MINUTE SOURCE BAR REQUEST
+// ============================================================================
+
+sourcePayload() =>
+    [time,
+     priceToTicks(high),
+     priceToTicks(low),
+     volume]
+
+[sourceTimes,
+ sourceHighTicks,
+ sourceLowTicks,
+ sourceVolumes] = request.security_lower_tf(
+     syminfo.tickerid,
+     SOURCE_TIMEFRAME,
+     sourcePayload(),
+     ignore_invalid_timeframe = true)
+
+bool chartSupported =
+     chart.is_standard and
+     timeframe.isminutes and
+     timeframe.in_seconds() == 15 * 60
+bool inputWindowValid =
+     profileStartInput <
+      profileEndBarInput and
+     profileStartInput % MINUTE_MS == 0 and
+     profileEndBarInput % MINUTE_MS == 0
+
+var map<int, float> fineBins =
+     map.new<int, float>()
+var map<int, float> baseBins =
+     map.new<int, float>()
+var map<int, float> coarseBins =
+     map.new<int, float>()
+
+var int fineMinBin = na
+var int fineMaxBin = na
+var int baseMinBin = na
+var int baseMaxBin = na
+var int coarseMinBin = na
+var int coarseMaxBin = na
+
+var float sourceTotalVolume = 0.0
+var float fineAllocatedVolume = 0.0
+var float baseAllocatedVolume = 0.0
+var float coarseAllocatedVolume = 0.0
+var int includedSourceBars = 0
+var int firstIncludedSourceTime = na
+var int lastIncludedSourceTime = na
+var int previousIncludedSourceTime = na
+var int invalidSourceBars = 0
+var bool sourceArrayIssue = false
+var bool sourceOrderIssue = false
+var bool fineOverflow = false
+var bool baseOverflow = false
+var bool coarseOverflow = false
+
+if chartSupported and
+ inputWindowValid and
+ gridConfigurationValid and
+ barstate.isconfirmed
+    int timeCount = sourceTimes.size()
+    int highCount = sourceHighTicks.size()
+    int lowCount = sourceLowTicks.size()
+    int volumeCount = sourceVolumes.size()
+    bool lengthsMatch =
+         timeCount == highCount and
+         timeCount == lowCount and
+         timeCount == volumeCount
+    sourceArrayIssue :=
+         sourceArrayIssue or
+         not lengthsMatch
+    int safeCount = math.min(
+         math.min(
+             timeCount,
+             highCount),
+         math.min(
+             lowCount,
+             volumeCount))
+
+    if safeCount > 0
+        for sourceIndex =
+         0 to safeCount - 1
+            int sourceTime =
+                 sourceTimes.get(
+                     sourceIndex)
+            int sourceHigh =
+                 sourceHighTicks.get(
+                     sourceIndex)
+            int sourceLow =
+                 sourceLowTicks.get(
+                     sourceIndex)
+            float sourceVolume =
+                 sourceVolumes.get(
+                     sourceIndex)
+            bool useForProfile =
+                 not na(sourceTime) and
+                 sourceTime >=
+                  profileStartInput and
+                 sourceTime <
+                  profileEndExclusive
+
+            if useForProfile
+                firstIncludedSourceTime :=
+                     includedSourceBars == 0 ?
+                     sourceTime :
+                     firstIncludedSourceTime
+                sourceOrderIssue :=
+                     sourceOrderIssue or
+                     (
+                         not na(
+                             previousIncludedSourceTime) and
+                         sourceTime <=
+                          previousIncludedSourceTime)
+                previousIncludedSourceTime :=
+                     sourceTime
+                lastIncludedSourceTime :=
+                     sourceTime
+                includedSourceBars += 1
+
+                bool sourceValid =
+                     not na(sourceHigh) and
+                     not na(sourceLow) and
+                     not na(sourceVolume) and
+                     sourceVolume >= 0.0 and
+                     sourceHigh >= sourceLow
+                invalidSourceBars +=
+                     sourceValid ? 0 : 1
+
+                if sourceValid
+                    sourceTotalVolume +=
+                         sourceVolume
+                    int sourceTickCount =
+                         sourceHigh -
+                         sourceLow +
+                         1
+
+                    int sourceFineLowBin =
+                         int(math.floor(
+                             (
+                                 sourceLow -
+                                 GRID_ORIGIN_TICKS) /
+                             float(
+                                 fineTicks)))
+                    int sourceFineHighBin =
+                         int(math.floor(
+                             (
+                                 sourceHigh -
+                                 GRID_ORIGIN_TICKS) /
+                             float(
+                                 fineTicks)))
+                    for outputBin =
+                     sourceFineLowBin to
+                     sourceFineHighBin
+                        int binLowTick =
+                             GRID_ORIGIN_TICKS +
+                             outputBin *
+                              fineTicks
+                        int binHighTick =
+                             binLowTick +
+                             fineTicks -
+                             1
+                        int overlapLow =
+                             math.max(
+                                 sourceLow,
+                                 binLowTick)
+                        int overlapHigh =
+                             math.min(
+                                 sourceHigh,
+                                 binHighTick)
+                        int overlapTicks =
+                             math.max(
+                                 0,
+                                 overlapHigh -
+                                 overlapLow +
+                                 1)
+                        float allocatedVolume =
+                             sourceVolume *
+                             overlapTicks /
+                             sourceTickCount
+                        if overlapTicks > 0
+                            [nextMin,
+                             nextMax,
+                             putOverflow] =
+                                 boundedPut(
+                                     fineBins,
+                                     outputBin,
+                                     allocatedVolume,
+                                     fineMinBin,
+                                     fineMaxBin)
+                            fineMinBin := nextMin
+                            fineMaxBin := nextMax
+                            fineOverflow :=
+                                 fineOverflow or
+                                 putOverflow
+                            fineAllocatedVolume +=
+                                 allocatedVolume
+
+                    int sourceBaseLowBin =
+                         int(math.floor(
+                             (
+                                 sourceLow -
+                                 GRID_ORIGIN_TICKS) /
+                             float(
+                                 baseTicksInput)))
+                    int sourceBaseHighBin =
+                         int(math.floor(
+                             (
+                                 sourceHigh -
+                                 GRID_ORIGIN_TICKS) /
+                             float(
+                                 baseTicksInput)))
+                    for outputBin =
+                     sourceBaseLowBin to
+                     sourceBaseHighBin
+                        int binLowTick =
+                             GRID_ORIGIN_TICKS +
+                             outputBin *
+                              baseTicksInput
+                        int binHighTick =
+                             binLowTick +
+                             baseTicksInput -
+                             1
+                        int overlapLow =
+                             math.max(
+                                 sourceLow,
+                                 binLowTick)
+                        int overlapHigh =
+                             math.min(
+                                 sourceHigh,
+                                 binHighTick)
+                        int overlapTicks =
+                             math.max(
+                                 0,
+                                 overlapHigh -
+                                 overlapLow +
+                                 1)
+                        float allocatedVolume =
+                             sourceVolume *
+                             overlapTicks /
+                             sourceTickCount
+                        if overlapTicks > 0
+                            [nextMin,
+                             nextMax,
+                             putOverflow] =
+                                 boundedPut(
+                                     baseBins,
+                                     outputBin,
+                                     allocatedVolume,
+                                     baseMinBin,
+                                     baseMaxBin)
+                            baseMinBin := nextMin
+                            baseMaxBin := nextMax
+                            baseOverflow :=
+                                 baseOverflow or
+                                 putOverflow
+                            baseAllocatedVolume +=
+                                 allocatedVolume
+
+                    int sourceCoarseLowBin =
+                         int(math.floor(
+                             (
+                                 sourceLow -
+                                 GRID_ORIGIN_TICKS) /
+                             float(
+                                 coarseTicks)))
+                    int sourceCoarseHighBin =
+                         int(math.floor(
+                             (
+                                 sourceHigh -
+                                 GRID_ORIGIN_TICKS) /
+                             float(
+                                 coarseTicks)))
+                    for outputBin =
+                     sourceCoarseLowBin to
+                     sourceCoarseHighBin
+                        int binLowTick =
+                             GRID_ORIGIN_TICKS +
+                             outputBin *
+                              coarseTicks
+                        int binHighTick =
+                             binLowTick +
+                             coarseTicks -
+                             1
+                        int overlapLow =
+                             math.max(
+                                 sourceLow,
+                                 binLowTick)
+                        int overlapHigh =
+                             math.min(
+                                 sourceHigh,
+                                 binHighTick)
+                        int overlapTicks =
+                             math.max(
+                                 0,
+                                 overlapHigh -
+                                 overlapLow +
+                                 1)
+                        float allocatedVolume =
+                             sourceVolume *
+                             overlapTicks /
+                             sourceTickCount
+                        if overlapTicks > 0
+                            [nextMin,
+                             nextMax,
+                             putOverflow] =
+                                 boundedPut(
+                                     coarseBins,
+                                     outputBin,
+                                     allocatedVolume,
+                                     coarseMinBin,
+                                     coarseMaxBin)
+                            coarseMinBin := nextMin
+                            coarseMaxBin := nextMax
+                            coarseOverflow :=
+                                 coarseOverflow or
+                                 putOverflow
+                            coarseAllocatedVolume +=
+                                 allocatedVolume
+
+
+// ============================================================================
+// DRAWING STATE
+// ============================================================================
+
+var box rangeBox = na
+var line pocLine = na
+var line valueAreaHighLine = na
+var line valueAreaLowLine = na
+var array<line> histogramLines =
+     array.new_line()
+var array<line> consensusLines =
+     array.new_line()
+var array<label> consensusLabels =
+     array.new_label()
+var table diagnosticTable = table.new(
+     position.top_right,
+     2,
+     28,
+     frame_color =
+      color.new(color.gray, 35),
+     frame_width = 1,
+     border_color =
+      color.new(color.gray, 70),
+     border_width = 1)
+
+
+// ============================================================================
+// LAST-BAR PROFILE, CONSENSUS, AND VISUALS
+// ============================================================================
+
+if barstate.islast
+    if not na(rangeBox)
+        box.delete(rangeBox)
+        rangeBox := na
+    if not na(pocLine)
+        line.delete(pocLine)
+        pocLine := na
+    if not na(valueAreaHighLine)
+        line.delete(valueAreaHighLine)
+        valueAreaHighLine := na
+    if not na(valueAreaLowLine)
+        line.delete(valueAreaLowLine)
+        valueAreaLowLine := na
+    clearLines(histogramLines)
+    clearLines(consensusLines)
+    clearLabels(consensusLabels)
+
+    float outlineHigh = na
+    float outlineLow = na
+    int scanBars =
+         math.min(bar_index, 4999)
+    for offset = 0 to scanBars
+        if time[offset] >=
+         profileStartInput and
+         time[offset] <
+         profileEndExclusive
+            outlineHigh :=
+                 na(outlineHigh) ?
+                 high[offset] :
+                 math.max(
+                     outlineHigh,
+                     high[offset])
+            outlineLow :=
+                 na(outlineLow) ?
+                 low[offset] :
+                 math.min(
+                     outlineLow,
+                     low[offset])
+    if inputWindowValid and
+     not na(outlineHigh)
+        rangeBox := box.new(
+             left = profileStartInput,
+             top = outlineHigh,
+             right = profileEndExclusive,
+             bottom = outlineLow,
+             xloc = xloc.bar_time,
+             border_color = rangeColorInput,
+             border_width = 2,
+             border_style =
+              line.style_dashed,
+             bgcolor =
+              color.new(rangeColorInput, 97))
+
+    bool endpointsComplete =
+         firstIncludedSourceTime ==
+          profileStartInput and
+         lastIncludedSourceTime +
+          SOURCE_BAR_MS ==
+          profileEndExclusive
+    float reconciliationTolerance =
+         math.max(
+             0.000001,
+             math.abs(sourceTotalVolume) *
+              0.000000001)
+    bool fineReconciliationValid =
+         math.abs(
+             fineAllocatedVolume -
+             sourceTotalVolume) <=
+         reconciliationTolerance
+    bool baseReconciliationValid =
+         math.abs(
+             baseAllocatedVolume -
+             sourceTotalVolume) <=
+         reconciliationTolerance
+    bool coarseReconciliationValid =
+         math.abs(
+             coarseAllocatedVolume -
+             sourceTotalVolume) <=
+         reconciliationTolerance
+    bool constructionComplete =
+         chartSupported and
+         inputWindowValid and
+         gridConfigurationValid and
+         time >= profileEndExclusive and
+         endpointsComplete and
+         includedSourceBars > 0 and
+         invalidSourceBars == 0 and
+         not sourceArrayIssue and
+         not sourceOrderIssue and
+         not fineOverflow and
+         not baseOverflow and
+         not coarseOverflow and
+         fineReconciliationValid and
+         baseReconciliationValid and
+         coarseReconciliationValid
+
+    [fineAlgorithmValid,
+     finePocBin,
+     fineValueAreaLowBin,
+     fineValueAreaHighBin,
+     fineAchievedValueAreaPercent,
+     fineMaximumBinVolume] =
+         calculateProfile(
+             fineBins,
+             fineMinBin,
+             fineMaxBin,
+             fineAllocatedVolume,
+             fineTicks)
+    [baseAlgorithmValid,
+     basePocBin,
+     baseValueAreaLowBin,
+     baseValueAreaHighBin,
+     baseAchievedValueAreaPercent,
+     baseMaximumBinVolume] =
+         calculateProfile(
+             baseBins,
+             baseMinBin,
+             baseMaxBin,
+             baseAllocatedVolume,
+             baseTicksInput)
+    [coarseAlgorithmValid,
+     coarsePocBin,
+     coarseValueAreaLowBin,
+     coarseValueAreaHighBin,
+     coarseAchievedValueAreaPercent,
+     coarseMaximumBinVolume] =
+         calculateProfile(
+             coarseBins,
+             coarseMinBin,
+             coarseMaxBin,
+             coarseAllocatedVolume,
+             coarseTicks)
+    bool multiProfileValid =
+         constructionComplete and
+         fineAlgorithmValid and
+         baseAlgorithmValid and
+         coarseAlgorithmValid
+
+    float basePocPrice =
+         multiProfileValid ?
+         (
+             GRID_ORIGIN_TICKS +
+             basePocBin *
+              baseTicksInput +
+             baseTicksInput *
+              0.5) *
+          syminfo.mintick : na
+    float baseValueAreaLowPrice =
+         multiProfileValid ?
+         (
+             GRID_ORIGIN_TICKS +
+             baseValueAreaLowBin *
+              baseTicksInput) *
+          syminfo.mintick : na
+    float baseValueAreaHighPrice =
+         multiProfileValid ?
+         (
+             GRID_ORIGIN_TICKS +
+             (
+                 baseValueAreaHighBin +
+                 1) *
+              baseTicksInput) *
+          syminfo.mintick : na
+
+    array<int> fineCandidateTicks =
+         array.new_int()
+    array<float> fineCandidateClean =
+         array.new_float()
+    array<float> fineCandidateZ =
+         array.new_float()
+    array<int> fineCandidateDirections =
+         array.new_int()
+    int fineRawCount = 0
+    float fineCleanMad = na
+    array<int> baseCandidateTicks =
+         array.new_int()
+    array<float> baseCandidateClean =
+         array.new_float()
+    array<float> baseCandidateZ =
+         array.new_float()
+    array<int> baseCandidateDirections =
+         array.new_int()
+    int baseRawCount = 0
+    float baseCleanMad = na
+    array<int> coarseCandidateTicks =
+         array.new_int()
+    array<float> coarseCandidateClean =
+         array.new_float()
+    array<float> coarseCandidateZ =
+         array.new_float()
+    array<int> coarseCandidateDirections =
+         array.new_int()
+    int coarseRawCount = 0
+    float coarseCleanMad = na
+
+    if multiProfileValid
+        [fineSelectedTicks,
+         fineSelectedClean,
+         fineSelectedZ,
+         fineSelectedDirections,
+         fineRaw,
+         fineMad] =
+             scoreGatedCandidates(
+                 fineBins,
+                 fineMinBin,
+                 fineMaxBin,
+                 fineTicks,
+                 fineMaximumBinVolume,
+                 minimumRatioInput,
+                 maximumNoiseFractionInput,
+                 minimumDenseFractionInput,
+                 minimumRobustZInput,
+                 localClusterRowsInput,
+                 candidateCapPerGridInput)
+        fineCandidateTicks :=
+             fineSelectedTicks
+        fineCandidateClean :=
+             fineSelectedClean
+        fineCandidateZ :=
+             fineSelectedZ
+        fineCandidateDirections :=
+             fineSelectedDirections
+        fineRawCount := fineRaw
+        fineCleanMad := fineMad
+
+        [baseSelectedTicks,
+         baseSelectedClean,
+         baseSelectedZ,
+         baseSelectedDirections,
+         baseRaw,
+         baseMad] =
+             scoreGatedCandidates(
+                 baseBins,
+                 baseMinBin,
+                 baseMaxBin,
+                 baseTicksInput,
+                 baseMaximumBinVolume,
+                 minimumRatioInput,
+                 maximumNoiseFractionInput,
+                 minimumDenseFractionInput,
+                 minimumRobustZInput,
+                 localClusterRowsInput,
+                 candidateCapPerGridInput)
+        baseCandidateTicks :=
+             baseSelectedTicks
+        baseCandidateClean :=
+             baseSelectedClean
+        baseCandidateZ :=
+             baseSelectedZ
+        baseCandidateDirections :=
+             baseSelectedDirections
+        baseRawCount := baseRaw
+        baseCleanMad := baseMad
+
+        [coarseSelectedTicks,
+         coarseSelectedClean,
+         coarseSelectedZ,
+         coarseSelectedDirections,
+         coarseRaw,
+         coarseMad] =
+             scoreGatedCandidates(
+                 coarseBins,
+                 coarseMinBin,
+                 coarseMaxBin,
+                 coarseTicks,
+                 coarseMaximumBinVolume,
+                 minimumRatioInput,
+                 maximumNoiseFractionInput,
+                 minimumDenseFractionInput,
+                 minimumRobustZInput,
+                 localClusterRowsInput,
+                 candidateCapPerGridInput)
+        coarseCandidateTicks :=
+             coarseSelectedTicks
+        coarseCandidateClean :=
+             coarseSelectedClean
+        coarseCandidateZ :=
+             coarseSelectedZ
+        coarseCandidateDirections :=
+             coarseSelectedDirections
+        coarseRawCount := coarseRaw
+        coarseCleanMad := coarseMad
+
+    // Every consensus cluster is seeded by a passing base-grid candidate.
+    // Neighbors are accepted only when every pair in the cluster is within Q.
+    // This is complete-linkage: a fine candidate cannot chain through the base
+    // to a coarse candidate that is more than Q ticks away from it.
+    array<int> clusterBaseTicks =
+         array.new_int()
+    array<int> clusterFineTicks =
+         array.new_int()
+    array<int> clusterCoarseTicks =
+         array.new_int()
+    array<int> clusterBaseDirections =
+         array.new_int()
+    array<int> clusterFineDirections =
+         array.new_int()
+    array<int> clusterCoarseDirections =
+         array.new_int()
+    array<float> clusterBaseZ =
+         array.new_float()
+    array<float> clusterFineZ =
+         array.new_float()
+    array<float> clusterCoarseZ =
+         array.new_float()
+    array<int> clusterSupportCounts =
+         array.new_int()
+    array<float> clusterMinimumZ =
+         array.new_float()
+    float consensusRadiusTicks =
+         consensusClusterBaseRowsInput *
+         baseTicksInput
+    float endpointRadiusTicks =
+         baseTicksInput
+    float maximumNodeWidthTicks =
+         maximumNodeWidthBaseRowsInput *
+         baseTicksInput
+
+    if baseCandidateTicks.size() > 0
+        for baseIndex =
+         0 to baseCandidateTicks.size() - 1
+            int baseTick =
+                 baseCandidateTicks.get(
+                     baseIndex)
+            float baseZ =
+                 baseCandidateZ.get(
+                     baseIndex)
+            int bestFineIndex = -1
+            int bestCoarseIndex = -1
+            int bestSupport = 1
+            float bestMinimumZ = baseZ
+            int bestTotalDistance = 0
+
+            if fineCandidateTicks.size() > 0
+                for fineIndex =
+                 0 to fineCandidateTicks.size() - 1
+                    int fineTick =
+                         fineCandidateTicks.get(
+                             fineIndex)
+                    int fineDistance =
+                         math.abs(
+                             fineTick -
+                             baseTick)
+                    if fineDistance <=
+                     consensusRadiusTicks
+                        float combinationMinimumZ =
+                             math.min(
+                                 baseZ,
+                                 fineCandidateZ.get(
+                                     fineIndex))
+                        if betterConsensusCombination(
+                             2,
+                             combinationMinimumZ,
+                             fineDistance,
+                             bestSupport,
+                             bestMinimumZ,
+                             bestTotalDistance)
+                            bestFineIndex :=
+                                 fineIndex
+                            bestCoarseIndex := -1
+                            bestSupport := 2
+                            bestMinimumZ :=
+                                 combinationMinimumZ
+                            bestTotalDistance :=
+                                 fineDistance
+
+            if coarseCandidateTicks.size() > 0
+                for coarseIndex =
+                 0 to coarseCandidateTicks.size() - 1
+                    int coarseTick =
+                         coarseCandidateTicks.get(
+                             coarseIndex)
+                    int coarseDistance =
+                         math.abs(
+                             coarseTick -
+                             baseTick)
+                    if coarseDistance <=
+                     consensusRadiusTicks
+                        float combinationMinimumZ =
+                             math.min(
+                                 baseZ,
+                                 coarseCandidateZ.get(
+                                     coarseIndex))
+                        if betterConsensusCombination(
+                             2,
+                             combinationMinimumZ,
+                             coarseDistance,
+                             bestSupport,
+                             bestMinimumZ,
+                             bestTotalDistance)
+                            bestFineIndex := -1
+                            bestCoarseIndex :=
+                                 coarseIndex
+                            bestSupport := 2
+                            bestMinimumZ :=
+                                 combinationMinimumZ
+                            bestTotalDistance :=
+                                 coarseDistance
+
+            if fineCandidateTicks.size() > 0 and
+             coarseCandidateTicks.size() > 0
+                for fineIndex =
+                 0 to fineCandidateTicks.size() - 1
+                    int fineTick =
+                         fineCandidateTicks.get(
+                             fineIndex)
+                    int fineDistance =
+                         math.abs(
+                             fineTick -
+                             baseTick)
+                    if fineDistance <=
+                     consensusRadiusTicks
+                        for coarseIndex =
+                         0 to coarseCandidateTicks.size() - 1
+                            int coarseTick =
+                                 coarseCandidateTicks.get(
+                                     coarseIndex)
+                            int coarseDistance =
+                                 math.abs(
+                                     coarseTick -
+                                     baseTick)
+                            int neighborDistance =
+                                 math.abs(
+                                     fineTick -
+                                     coarseTick)
+                            bool completeLink =
+                                 coarseDistance <=
+                                  consensusRadiusTicks and
+                                 neighborDistance <=
+                                  consensusRadiusTicks
+                            if completeLink
+                                float combinationMinimumZ =
+                                     math.min(
+                                         baseZ,
+                                         math.min(
+                                             fineCandidateZ.get(
+                                                 fineIndex),
+                                             coarseCandidateZ.get(
+                                                 coarseIndex)))
+                                int totalDistance =
+                                     fineDistance +
+                                     coarseDistance +
+                                     neighborDistance
+                                if betterConsensusCombination(
+                                     3,
+                                     combinationMinimumZ,
+                                     totalDistance,
+                                     bestSupport,
+                                     bestMinimumZ,
+                                     bestTotalDistance)
+                                    bestFineIndex :=
+                                         fineIndex
+                                    bestCoarseIndex :=
+                                         coarseIndex
+                                    bestSupport := 3
+                                    bestMinimumZ :=
+                                         combinationMinimumZ
+                                    bestTotalDistance :=
+                                         totalDistance
+
+            clusterBaseTicks.push(baseTick)
+            clusterBaseDirections.push(
+                 baseCandidateDirections.get(
+                     baseIndex))
+            clusterBaseZ.push(baseZ)
+            clusterFineTicks.push(
+                 bestFineIndex >= 0 ?
+                 fineCandidateTicks.get(
+                     bestFineIndex) : na)
+            clusterFineDirections.push(
+                 bestFineIndex >= 0 ?
+                 fineCandidateDirections.get(
+                     bestFineIndex) : na)
+            clusterFineZ.push(
+                 bestFineIndex >= 0 ?
+                 fineCandidateZ.get(
+                     bestFineIndex) : na)
+            clusterCoarseTicks.push(
+                 bestCoarseIndex >= 0 ?
+                 coarseCandidateTicks.get(
+                     bestCoarseIndex) : na)
+            clusterCoarseDirections.push(
+                 bestCoarseIndex >= 0 ?
+                 coarseCandidateDirections.get(
+                     bestCoarseIndex) : na)
+            clusterCoarseZ.push(
+                 bestCoarseIndex >= 0 ?
+                 coarseCandidateZ.get(
+                     bestCoarseIndex) : na)
+            clusterSupportCounts.push(
+                 bestSupport)
+            clusterMinimumZ.push(
+                 bestMinimumZ)
+
+    bool structuralBoundsValid =
+         not useStructuralBoundsInput or
+         structuralHighInput >
+          structuralLowInput
+    int structuralLowTicks =
+         priceToTicks(structuralLowInput)
+    int structuralHighTicks =
+         priceToTicks(structuralHighInput)
+    float structuralDistanceTicks =
+         structuralDistanceBaseRowsInput *
+         baseTicksInput
+
+    array<int> eligibleClusterIndices =
+         array.new_int()
+    array<bool> clusterDrawingSuppressed =
+         array.new_bool(
+             clusterBaseTicks.size(),
+             false)
+    int structurallySuppressedCount = 0
+    if multiProfileValid and
+     structuralBoundsValid and
+     clusterBaseTicks.size() > 0
+        for clusterIndex =
+         0 to clusterBaseTicks.size() - 1
+            int supportCount =
+                 clusterSupportCounts.get(
+                     clusterIndex)
+            int consensusTick =
+                 clusterBaseTicks.get(
+                     clusterIndex)
+            bool nearStructuralBound =
+                 useStructuralBoundsInput and
+                 (
+                     math.abs(
+                         consensusTick -
+                         structuralLowTicks) <=
+                      structuralDistanceTicks or
+                     math.abs(
+                         consensusTick -
+                         structuralHighTicks) <=
+                      structuralDistanceTicks)
+            if supportCount >=
+             MIN_CONSENSUS_GRIDS
+                if nearStructuralBound
+                    structurallySuppressedCount +=
+                         1
+                clusterDrawingSuppressed.set(
+                     clusterIndex,
+                     nearStructuralBound)
+                eligibleClusterIndices.push(
+                     clusterIndex)
+
+    // Build one paired-node candidate per eligible base-seeded cluster.
+    // The base pair is mandatory. Fine/coarse support counts only when its
+    // retained dense direction matches the base and both pair endpoints obey
+    // complete-link distance Q.
+    float fineLogEpsilon =
+         profileLogEpsilon(
+             fineBins,
+             fineMinBin,
+             fineMaxBin)
+    float baseLogEpsilon =
+         profileLogEpsilon(
+             baseBins,
+             baseMinBin,
+             baseMaxBin)
+    float coarseLogEpsilon =
+         profileLogEpsilon(
+             coarseBins,
+             coarseMinBin,
+             coarseMaxBin)
+    array<int> stableNodeClusters =
+         array.new_int()
+    array<int> stableNodeMates =
+         array.new_int()
+    array<int> stableNodeDirections =
+         array.new_int()
+    array<int> stableNodeSupports =
+         array.new_int()
+    array<float> stableNodeWorstProminence =
+         array.new_float()
+    array<float> stableNodeMinimumZ =
+         array.new_float()
+    array<int> stableNodeWidths =
+         array.new_int()
+
+    if multiProfileValid and
+     eligibleClusterIndices.size() > 0
+        for eligibleIndex =
+         0 to eligibleClusterIndices.size() - 1
+            int clusterIndex =
+                 eligibleClusterIndices.get(
+                     eligibleIndex)
+            int baseAnchor =
+                 clusterBaseTicks.get(
+                     clusterIndex)
+            int baseDirection =
+                 clusterBaseDirections.get(
+                     clusterIndex)
+            [basePairValid,
+             baseMate,
+             baseProminence,
+             baseWidth] =
+                 traceNodeMate(
+                     baseBins,
+                     baseMinBin,
+                     baseMaxBin,
+                     baseTicksInput,
+                     baseAnchor,
+                     baseDirection,
+                     maximumNodeWidthTicks,
+                     baseLogEpsilon)
+
+            // Search all nearby same-direction neighbors after the base pair
+            // exists. This avoids inheriting a standalone-neighbor choice that
+            // is close in price but has the wrong dense direction or mate.
+            array<int> agreeingFineIndices =
+                 array.new_int()
+            array<int> agreeingFineAnchors =
+                 array.new_int()
+            array<int> agreeingFineMates =
+                 array.new_int()
+            array<float> agreeingFineProminences =
+                 array.new_float()
+            array<int> agreeingCoarseIndices =
+                 array.new_int()
+            array<int> agreeingCoarseAnchors =
+                 array.new_int()
+            array<int> agreeingCoarseMates =
+                 array.new_int()
+            array<float> agreeingCoarseProminences =
+                 array.new_float()
+
+            if basePairValid and
+             fineCandidateTicks.size() > 0
+                for fineIndex =
+                 0 to fineCandidateTicks.size() - 1
+                    int fineAnchor =
+                         fineCandidateTicks.get(
+                             fineIndex)
+                    int fineDirection =
+                         fineCandidateDirections.get(
+                             fineIndex)
+                    bool anchorEligible =
+                         fineDirection ==
+                          baseDirection and
+                         math.abs(
+                             fineAnchor -
+                             baseAnchor) <=
+                          consensusRadiusTicks
+                    if anchorEligible
+                        [finePairValid,
+                         fineMate,
+                         fineProminence,
+                         fineWidth] =
+                             traceNodeMate(
+                                 fineBins,
+                                 fineMinBin,
+                                 fineMaxBin,
+                                 fineTicks,
+                                 fineAnchor,
+                                 fineDirection,
+                                 maximumNodeWidthTicks,
+                                 fineLogEpsilon)
+                        if finePairValid and
+                         math.abs(
+                             fineMate -
+                             baseMate) <=
+                          endpointRadiusTicks
+                            agreeingFineIndices.push(
+                                 fineIndex)
+                            agreeingFineAnchors.push(
+                                 fineAnchor)
+                            agreeingFineMates.push(
+                                 fineMate)
+                            agreeingFineProminences.push(
+                                 fineProminence)
+
+            if basePairValid and
+             coarseCandidateTicks.size() > 0
+                for coarseIndex =
+                 0 to coarseCandidateTicks.size() - 1
+                    int coarseAnchor =
+                         coarseCandidateTicks.get(
+                             coarseIndex)
+                    int coarseDirection =
+                         coarseCandidateDirections.get(
+                             coarseIndex)
+                    bool anchorEligible =
+                         coarseDirection ==
+                          baseDirection and
+                         math.abs(
+                             coarseAnchor -
+                             baseAnchor) <=
+                          consensusRadiusTicks
+                    if anchorEligible
+                        [coarsePairValid,
+                         coarseMate,
+                         coarseProminence,
+                         coarseWidth] =
+                             traceNodeMate(
+                                 coarseBins,
+                                 coarseMinBin,
+                                 coarseMaxBin,
+                                 coarseTicks,
+                                 coarseAnchor,
+                                 coarseDirection,
+                                 maximumNodeWidthTicks,
+                                 coarseLogEpsilon)
+                        if coarsePairValid and
+                         math.abs(
+                             coarseMate -
+                             baseMate) <=
+                          endpointRadiusTicks
+                            agreeingCoarseIndices.push(
+                                 coarseIndex)
+                            agreeingCoarseAnchors.push(
+                                 coarseAnchor)
+                            agreeingCoarseMates.push(
+                                 coarseMate)
+                            agreeingCoarseProminences.push(
+                                 coarseProminence)
+
+            int nodeSupport = 0
+            float nodeWorstProminence = na
+            float nodeMinimumZ = na
+            float baseZ =
+                 clusterBaseZ.get(
+                     clusterIndex)
+
+            // Two-grid alternatives.
+            if agreeingFineIndices.size() > 0
+                for agreeingFineIndex =
+                 0 to agreeingFineIndices.size() - 1
+                    int fineIndex =
+                         agreeingFineIndices.get(
+                             agreeingFineIndex)
+                    float candidateProminence =
+                         math.min(
+                             baseProminence,
+                             agreeingFineProminences.get(
+                                 agreeingFineIndex))
+                    float candidateMinimumZ =
+                         math.min(
+                             baseZ,
+                             fineCandidateZ.get(
+                                 fineIndex))
+                    if betterNode(
+                         2,
+                         candidateProminence,
+                         candidateMinimumZ,
+                         nodeSupport,
+                         nodeWorstProminence,
+                         nodeMinimumZ)
+                        nodeSupport := 2
+                        nodeWorstProminence :=
+                             candidateProminence
+                        nodeMinimumZ :=
+                             candidateMinimumZ
+
+            if agreeingCoarseIndices.size() > 0
+                for agreeingCoarseIndex =
+                 0 to agreeingCoarseIndices.size() - 1
+                    int coarseIndex =
+                         agreeingCoarseIndices.get(
+                             agreeingCoarseIndex)
+                    float candidateProminence =
+                         math.min(
+                             baseProminence,
+                             agreeingCoarseProminences.get(
+                                 agreeingCoarseIndex))
+                    float candidateMinimumZ =
+                         math.min(
+                             baseZ,
+                             coarseCandidateZ.get(
+                                 coarseIndex))
+                    if betterNode(
+                         2,
+                         candidateProminence,
+                         candidateMinimumZ,
+                         nodeSupport,
+                         nodeWorstProminence,
+                         nodeMinimumZ)
+                        nodeSupport := 2
+                        nodeWorstProminence :=
+                             candidateProminence
+                        nodeMinimumZ :=
+                             candidateMinimumZ
+
+            // Three-grid alternatives retain complete linkage for both
+            // anchors and mate endpoints.
+            if agreeingFineIndices.size() > 0 and
+             agreeingCoarseIndices.size() > 0
+                for agreeingFineIndex =
+                 0 to agreeingFineIndices.size() - 1
+                    int fineAnchor =
+                         agreeingFineAnchors.get(
+                             agreeingFineIndex)
+                    int fineMate =
+                         agreeingFineMates.get(
+                             agreeingFineIndex)
+                    int fineIndex =
+                         agreeingFineIndices.get(
+                             agreeingFineIndex)
+                    for agreeingCoarseIndex =
+                     0 to agreeingCoarseIndices.size() - 1
+                        int coarseAnchor =
+                             agreeingCoarseAnchors.get(
+                                 agreeingCoarseIndex)
+                        int coarseMate =
+                             agreeingCoarseMates.get(
+                                 agreeingCoarseIndex)
+                        bool completeLink =
+                             math.abs(
+                                 fineAnchor -
+                                 coarseAnchor) <=
+                              consensusRadiusTicks and
+                             math.abs(
+                                 fineMate -
+                                 coarseMate) <=
+                              endpointRadiusTicks
+                        if completeLink
+                            int coarseIndex =
+                                 agreeingCoarseIndices.get(
+                                     agreeingCoarseIndex)
+                            float candidateProminence =
+                                 math.min(
+                                     baseProminence,
+                                     math.min(
+                                         agreeingFineProminences.get(
+                                             agreeingFineIndex),
+                                         agreeingCoarseProminences.get(
+                                             agreeingCoarseIndex)))
+                            float candidateMinimumZ =
+                                 math.min(
+                                     baseZ,
+                                     math.min(
+                                         fineCandidateZ.get(
+                                             fineIndex),
+                                         coarseCandidateZ.get(
+                                             coarseIndex)))
+                            if betterNode(
+                                 3,
+                                 candidateProminence,
+                                 candidateMinimumZ,
+                                 nodeSupport,
+                                 nodeWorstProminence,
+                                 nodeMinimumZ)
+                                nodeSupport := 3
+                                nodeWorstProminence :=
+                                     candidateProminence
+                                nodeMinimumZ :=
+                                     candidateMinimumZ
+
+            if basePairValid and
+             nodeSupport >=
+              MIN_CONSENSUS_GRIDS
+                stableNodeClusters.push(
+                     clusterIndex)
+                stableNodeMates.push(
+                     baseMate)
+                stableNodeDirections.push(
+                     baseDirection)
+                stableNodeSupports.push(
+                     nodeSupport)
+                stableNodeWorstProminence.push(
+                     nodeWorstProminence)
+                stableNodeMinimumZ.push(
+                     nodeMinimumZ)
+                stableNodeWidths.push(
+                     baseWidth)
+
+    // Selected structures are stable pairs first, then only anchors for which
+    // no stable mate exists. Selecting a pair consumes every consensus anchor
+    // inside its interval or within Q of either edge.
+    array<bool> clusterConsumed =
+         array.new_bool(
+             clusterBaseTicks.size(),
+             false)
+    array<bool> clusterHasStableNode =
+         array.new_bool(
+             clusterBaseTicks.size(),
+             false)
+    if stableNodeClusters.size() > 0
+        for nodeIndex =
+         0 to stableNodeClusters.size() - 1
+            clusterHasStableNode.set(
+                 stableNodeClusters.get(
+                     nodeIndex),
+                 true)
+
+    array<int> structureKinds =
+         array.new_int()
+    array<int> structureClusters =
+         array.new_int()
+    array<int> structureAnchorTicks =
+         array.new_int()
+    array<int> structureMateTicks =
+         array.new_int()
+    array<int> structureDirections =
+         array.new_int()
+    array<int> structureSupports =
+         array.new_int()
+    array<float> structureProminences =
+         array.new_float()
+    array<float> structureMinimumZ =
+         array.new_float()
+    array<int> structureWidths =
+         array.new_int()
+    array<bool> stableNodeConsumed =
+         array.new_bool(
+             stableNodeClusters.size(),
+             false)
+
+    if stableNodeClusters.size() > 0
+        for rank =
+         0 to maximumStructuresInput - 1
+            int bestNodeIndex = -1
+            int bestSupport = -1
+            float bestWorstProminence = na
+            float bestMinimumZ = na
+            int bestAnchor = na
+            for nodeIndex =
+             0 to stableNodeClusters.size() - 1
+                int clusterIndex =
+                     stableNodeClusters.get(
+                         nodeIndex)
+                bool available =
+                     not stableNodeConsumed.get(
+                         nodeIndex) and
+                     not clusterConsumed.get(
+                         clusterIndex)
+                if available
+                    int support =
+                         stableNodeSupports.get(
+                             nodeIndex)
+                    float worstProminence =
+                         stableNodeWorstProminence.get(
+                             nodeIndex)
+                    float minimumZ =
+                         stableNodeMinimumZ.get(
+                             nodeIndex)
+                    int anchor =
+                         clusterBaseTicks.get(
+                             clusterIndex)
+                    bool better =
+                         betterNode(
+                             support,
+                             worstProminence,
+                             minimumZ,
+                             bestSupport,
+                             bestWorstProminence,
+                             bestMinimumZ)
+                    if better or
+                     (
+                         support ==
+                          bestSupport and
+                         worstProminence ==
+                          bestWorstProminence and
+                         minimumZ ==
+                          bestMinimumZ and
+                         (
+                             na(bestAnchor) or
+                             anchor < bestAnchor))
+                        bestNodeIndex :=
+                             nodeIndex
+                        bestSupport := support
+                        bestWorstProminence :=
+                             worstProminence
+                        bestMinimumZ :=
+                             minimumZ
+                        bestAnchor := anchor
+
+            if bestNodeIndex >= 0 and
+             structureKinds.size() <
+              maximumStructuresInput
+                stableNodeConsumed.set(
+                     bestNodeIndex,
+                     true)
+                int clusterIndex =
+                     stableNodeClusters.get(
+                         bestNodeIndex)
+                int anchor =
+                     clusterBaseTicks.get(
+                         clusterIndex)
+                int mate =
+                     stableNodeMates.get(
+                         bestNodeIndex)
+                structureKinds.push(1)
+                structureClusters.push(
+                     clusterIndex)
+                structureAnchorTicks.push(
+                     anchor)
+                structureMateTicks.push(
+                     mate)
+                structureDirections.push(
+                     stableNodeDirections.get(
+                         bestNodeIndex))
+                structureSupports.push(
+                     stableNodeSupports.get(
+                         bestNodeIndex))
+                structureProminences.push(
+                     stableNodeWorstProminence.get(
+                         bestNodeIndex))
+                structureMinimumZ.push(
+                     stableNodeMinimumZ.get(
+                         bestNodeIndex))
+                structureWidths.push(
+                     stableNodeWidths.get(
+                         bestNodeIndex))
+
+                float consumeLow =
+                     math.min(
+                         anchor,
+                         mate) -
+                     consensusRadiusTicks
+                float consumeHigh =
+                     math.max(
+                         anchor,
+                         mate) +
+                     consensusRadiusTicks
+                if clusterBaseTicks.size() > 0
+                    for consumeIndex =
+                     0 to clusterBaseTicks.size() - 1
+                        int candidateAnchor =
+                             clusterBaseTicks.get(
+                                 consumeIndex)
+                        if candidateAnchor >=
+                         consumeLow and
+                         candidateAnchor <=
+                          consumeHigh
+                            clusterConsumed.set(
+                                 consumeIndex,
+                                 true)
+
+    // Fill any remaining slots with v0.4 consensus anchors only when that
+    // anchor had no cross-grid-stable mate.
+    if eligibleClusterIndices.size() > 0
+        for rank =
+         0 to maximumStructuresInput - 1
+            int bestCluster = -1
+            int bestSupport = -1
+            float bestMinimumZ = na
+            int bestBaseTick = na
+            if structureKinds.size() <
+             maximumStructuresInput
+                for eligibleIndex =
+                 0 to eligibleClusterIndices.size() - 1
+                    int clusterIndex =
+                         eligibleClusterIndices.get(
+                             eligibleIndex)
+                    bool available =
+                         not clusterConsumed.get(
+                             clusterIndex) and
+                         not clusterHasStableNode.get(
+                             clusterIndex)
+                    if available
+                        int supportCount =
+                             clusterSupportCounts.get(
+                                 clusterIndex)
+                        float minimumZ =
+                             clusterMinimumZ.get(
+                                 clusterIndex)
+                        int baseTick =
+                             clusterBaseTicks.get(
+                                 clusterIndex)
+                        if supportCount >
+                         bestSupport or
+                         (
+                             supportCount ==
+                              bestSupport and
+                             (
+                                 na(bestMinimumZ) or
+                                 minimumZ >
+                                  bestMinimumZ)) or
+                         (
+                             supportCount ==
+                              bestSupport and
+                             minimumZ ==
+                              bestMinimumZ and
+                             (
+                                 na(bestBaseTick) or
+                                 baseTick <
+                                  bestBaseTick))
+                            bestCluster :=
+                                 clusterIndex
+                            bestSupport :=
+                                 supportCount
+                            bestMinimumZ :=
+                                 minimumZ
+                            bestBaseTick :=
+                                 baseTick
+            if bestCluster >= 0 and
+             structureKinds.size() <
+              maximumStructuresInput
+                clusterConsumed.set(
+                     bestCluster,
+                     true)
+                structureKinds.push(0)
+                structureClusters.push(
+                     bestCluster)
+                structureAnchorTicks.push(
+                     clusterBaseTicks.get(
+                         bestCluster))
+                structureMateTicks.push(na)
+                structureDirections.push(
+                     clusterBaseDirections.get(
+                         bestCluster))
+                structureSupports.push(
+                     clusterSupportCounts.get(
+                         bestCluster))
+                structureProminences.push(na)
+                structureMinimumZ.push(
+                     clusterMinimumZ.get(
+                         bestCluster))
+                structureWidths.push(0)
+
+    if multiProfileValid
+        int histogramWidthMs = int(
+             (
+                 profileEndExclusive -
+                 profileStartInput) *
+             histogramWidthInput /
+             100.0)
+        for bin =
+         baseMinBin to baseMaxBin
+            float volumeAtBin =
+                 binVolume(baseBins, bin)
+            float relativeWidth =
+                 baseMaximumBinVolume > 0.0 ?
+                 volumeAtBin /
+                  baseMaximumBinVolume :
+                 0.0
+            float rowCenterPrice =
+                 (
+                     GRID_ORIGIN_TICKS +
+                     bin *
+                      baseTicksInput +
+                     baseTicksInput *
+                      0.5) *
+                 syminfo.mintick
+            line histogramLine = line.new(
+                 profileEndExclusive -
+                  int(
+                      histogramWidthMs *
+                      relativeWidth),
+                 rowCenterPrice,
+                 profileEndExclusive,
+                 rowCenterPrice,
+                 xloc = xloc.bar_time,
+                 color = color.new(
+                     rangeColorInput,
+                     65),
+                 width = 2)
+            histogramLines.push(
+                 histogramLine)
+
+        pocLine := line.new(
+             profileStartInput,
+             basePocPrice,
+             profileEndExclusive,
+             basePocPrice,
+             xloc = xloc.bar_time,
+             color = color.orange,
+             width = 2)
+        valueAreaHighLine := line.new(
+             profileStartInput,
+             baseValueAreaHighPrice,
+             profileEndExclusive,
+             baseValueAreaHighPrice,
+             xloc = xloc.bar_time,
+             color =
+              color.new(color.silver, 20),
+             style = line.style_dotted)
+        valueAreaLowLine := line.new(
+             profileStartInput,
+             baseValueAreaLowPrice,
+             profileEndExclusive,
+             baseValueAreaLowPrice,
+             xloc = xloc.bar_time,
+             color =
+              color.new(color.silver, 20),
+             style = line.style_dotted)
+
+        int structureEndTime =
+             extendStructuresInput ?
+             time :
+             profileEndExclusive
+        if structureKinds.size() > 0
+            for selectedPosition =
+             0 to structureKinds.size() - 1
+                int clusterIndex =
+                     structureClusters.get(
+                         selectedPosition)
+                int supportCount =
+                     structureSupports.get(
+                         selectedPosition)
+                int anchorTick =
+                     structureAnchorTicks.get(
+                         selectedPosition)
+                int mateTick =
+                     structureMateTicks.get(
+                         selectedPosition)
+                float anchorPrice =
+                     anchorTick *
+                     syminfo.mintick
+                bool drawingSuppressed =
+                     clusterDrawingSuppressed.get(
+                         clusterIndex)
+                bool paired =
+                     structureKinds.get(
+                         selectedPosition) == 1
+                int transparency =
+                     supportCount == 3 ?
+                     0 : 28
+                if not drawingSuppressed
+                    line anchorLine = line.new(
+                         profileStartInput,
+                         anchorPrice,
+                         structureEndTime,
+                         anchorPrice,
+                         xloc = xloc.bar_time,
+                         color = color.new(
+                             consensusColorInput,
+                             transparency),
+                         width =
+                             supportCount == 3 ?
+                             3 : 2)
+                    consensusLines.push(
+                         anchorLine)
+                    if paired
+                        float matePrice =
+                             mateTick *
+                             syminfo.mintick
+                        line mateLine = line.new(
+                             profileStartInput,
+                             matePrice,
+                             structureEndTime,
+                             matePrice,
+                             xloc = xloc.bar_time,
+                             color = color.new(
+                                 consensusColorInput,
+                                 transparency),
+                             width =
+                                 supportCount == 3 ?
+                                 3 : 2)
+                        consensusLines.push(
+                             mateLine)
+                string structureId =
+                     (
+                         paired ? "N" : "S") +
+                     str.tostring(
+                         selectedPosition + 1)
+                string anchorLabelText =
+                     structureId +
+                     (
+                         paired ? " A " : " ") +
+                     str.tostring(
+                         anchorPrice,
+                         format.mintick) +
+                     " | " +
+                     str.tostring(
+                         supportCount) +
+                     "/3 | min z " +
+                     str.tostring(
+                         structureMinimumZ.get(
+                             selectedPosition),
+                         "#.00")
+                if not drawingSuppressed
+                    label anchorLabel =
+                         label.new(
+                             structureEndTime,
+                             anchorPrice,
+                             anchorLabelText,
+                             xloc = xloc.bar_time,
+                             style =
+                              label.style_label_left,
+                             color = color.new(
+                                 color.black,
+                                 78),
+                             textcolor = color.new(
+                                 consensusColorInput,
+                                 transparency),
+                             size = size.tiny)
+                    consensusLabels.push(
+                         anchorLabel)
+                    if paired
+                        float matePrice =
+                             mateTick *
+                             syminfo.mintick
+                        string mateLabelText =
+                             structureId +
+                             " M " +
+                             str.tostring(
+                                 matePrice,
+                                 format.mintick) +
+                             " | P " +
+                             str.tostring(
+                                 structureProminences.get(
+                                     selectedPosition),
+                                 "#.00") +
+                             " | w " +
+                             str.tostring(
+                                 structureWidths.get(
+                                     selectedPosition)) +
+                             "r"
+                        label mateLabel =
+                             label.new(
+                                 structureEndTime,
+                                 matePrice,
+                                 mateLabelText,
+                                 xloc = xloc.bar_time,
+                                 style =
+                                  label.style_label_left,
+                                 color = color.new(
+                                     color.black,
+                                     78),
+                                 textcolor =
+                                  color.new(
+                                     consensusColorInput,
+                                     transparency),
+                                 size = size.tiny)
+                        consensusLabels.push(
+                             mateLabel)
+
+    string state =
+         multiProfileValid and
+          structuralBoundsValid ?
+         "VALID / EXPERIMENTAL" :
+         not chartSupported ?
+         "USE STANDARD 15m CHART" :
+         not inputWindowValid ?
+         "INVALID INPUT RANGE" :
+         not gridConfigurationValid ?
+         "ROW GRIDS NOT DISTINCT" :
+         not endpointsComplete ?
+         "ENDPOINT COVERAGE FAIL" :
+         invalidSourceBars > 0 ?
+         "INVALID SOURCE BAR" :
+         sourceArrayIssue ?
+         "SOURCE ARRAY FAIL" :
+         sourceOrderIssue ?
+         "SOURCE ORDER FAIL" :
+         fineOverflow or
+          baseOverflow or
+          coarseOverflow ?
+         "PROFILE CAP FAIL" :
+         not fineReconciliationValid or
+          not baseReconciliationValid or
+          not coarseReconciliationValid ?
+         "VOLUME RECONCILIATION FAIL" :
+         not fineAlgorithmValid or
+          not baseAlgorithmValid or
+          not coarseAlgorithmValid ?
+         "PROFILE ALGORITHM FAIL" :
+         not structuralBoundsValid ?
+         "INVALID STRUCTURAL BOUNDS" :
+         "INCOMPLETE"
+
+    string gridText =
+         str.tostring(fineTicks) +
+         " / " +
+         str.tostring(baseTicksInput) +
+         " / " +
+         str.tostring(coarseTicks) +
+         " ticks" +
+         (
+             gridConfigurationValid ?
+             "" : " (INVALID)")
+    string candidateCountText =
+         str.tostring(
+             fineCandidateTicks.size()) +
+         " / " +
+         str.tostring(
+             baseCandidateTicks.size()) +
+         " / " +
+         str.tostring(
+             coarseCandidateTicks.size())
+    string rawCountText =
+         str.tostring(fineRawCount) +
+         " / " +
+         str.tostring(baseRawCount) +
+         " / " +
+         str.tostring(coarseRawCount)
+    string cleanMadText =
+         floatText(fineCleanMad) +
+         " / " +
+         floatText(baseCleanMad) +
+         " / " +
+         floatText(coarseCleanMad)
+    string structuralStateText =
+         not useStructuralBoundsInput ?
+         "OFF" :
+         not structuralBoundsValid ?
+         "INVALID: high must exceed low" :
+         str.tostring(
+             structuralLowInput,
+             format.mintick) +
+         " / " +
+         str.tostring(
+         structuralHighInput,
+             format.mintick) +
+         " ± " +
+         str.tostring(
+             structuralDistanceBaseRowsInput,
+             "#.##") +
+         " rows"
+    string structureOneText = "NONE"
+    string structureTwoText = "NONE"
+    int visibleStructureCount = 0
+    int pairedStructureCount = 0
+    int standaloneStructureCount = 0
+    if structureKinds.size() > 0
+        for selectedPosition =
+         0 to structureKinds.size() - 1
+            bool paired =
+                 structureKinds.get(
+                     selectedPosition) == 1
+            int clusterIndex =
+                 structureClusters.get(
+                     selectedPosition)
+            bool drawingSuppressed =
+                 clusterDrawingSuppressed.get(
+                     clusterIndex)
+            visibleStructureCount +=
+                 drawingSuppressed ? 0 : 1
+            pairedStructureCount +=
+                 paired ? 1 : 0
+            standaloneStructureCount +=
+                 paired ? 0 : 1
+            float anchorPrice =
+                 structureAnchorTicks.get(
+                     selectedPosition) *
+                 syminfo.mintick
+            string item =
+                 (
+                     paired ? "NODE " : "SHELF ") +
+                 str.tostring(
+                     anchorPrice,
+                     format.mintick)
+            if paired
+                float matePrice =
+                     structureMateTicks.get(
+                         selectedPosition) *
+                     syminfo.mintick
+                item +=
+                     " - " +
+                     str.tostring(
+                         matePrice,
+                         format.mintick) +
+                     " | " +
+                     str.tostring(
+                         structureSupports.get(
+                             selectedPosition)) +
+                     "/3 | P " +
+                     str.tostring(
+                         structureProminences.get(
+                             selectedPosition),
+                         "#.00") +
+                     " | w " +
+                     str.tostring(
+                         structureWidths.get(
+                             selectedPosition)) +
+                     "r"
+            else
+                item +=
+                     " | " +
+                     str.tostring(
+                         structureSupports.get(
+                             selectedPosition)) +
+                     "/3 | z " +
+                     str.tostring(
+                         structureMinimumZ.get(
+                             selectedPosition),
+                         "#.00")
+            item +=
+                 drawingSuppressed ?
+                 " | HIDDEN" : ""
+            if selectedPosition == 0
+                structureOneText := item
+            if selectedPosition == 1
+                structureTwoText := item
+
+    color headerBg =
+         color.new(#1565c0, 10)
+    color rowBg =
+         color.new(color.black, 20)
+    color warningBg =
+         color.new(#8d6e63, 15)
+    diagnosticRow(
+         diagnosticTable,
+         0,
+         "VP RSD LOCAL 0.5.1",
+         state,
+         headerBg)
+    diagnosticRow(
+         diagnosticTable,
+         1,
+         "Source stream",
+         "one 15m total-volume stream",
+         warningBg)
+    diagnosticRow(
+         diagnosticTable,
+         2,
+         "Input start",
+         timeText(profileStartInput),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         3,
+         "Input end incl.",
+         timeText(profileEndBarInput),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         4,
+         "Fine / base / coarse",
+         gridText,
+         gridConfigurationValid ?
+          rowBg : warningBg)
+    diagnosticRow(
+         diagnosticTable,
+         5,
+         "Source bars",
+         str.tostring(
+             includedSourceBars),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         6,
+         "Invalid bars",
+         str.tostring(
+             invalidSourceBars),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         7,
+         "Source volume",
+         floatText(
+             sourceTotalVolume),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         8,
+         "Alloc diffs F/B/C",
+         floatText(
+             fineAllocatedVolume -
+             sourceTotalVolume) +
+         " / " +
+         floatText(
+             baseAllocatedVolume -
+             sourceTotalVolume) +
+         " / " +
+         floatText(
+             coarseAllocatedVolume -
+             sourceTotalVolume),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         9,
+         "Base profile bins",
+         multiProfileValid ?
+         str.tostring(
+             baseMaxBin -
+             baseMinBin +
+             1) :
+         "NA",
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         10,
+         "Base POC",
+         str.tostring(
+             basePocPrice,
+             format.mintick),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         11,
+         "Base VAL / VAH",
+         str.tostring(
+             baseValueAreaLowPrice,
+             format.mintick) +
+         " / " +
+         str.tostring(
+             baseValueAreaHighPrice,
+             format.mintick),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         12,
+         "Base VA achieved",
+         str.tostring(
+             baseAchievedValueAreaPercent,
+             "#.0") +
+         "%",
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         13,
+         "Raw boundaries F/B/C",
+         rawCountText,
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         14,
+         "Gated candidates F/B/C",
+         candidateCountText,
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         15,
+         "Clean MAD F/B/C",
+         cleanMadText,
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         16,
+         "Base-seeded clusters",
+         str.tostring(
+             clusterBaseTicks.size()),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         17,
+         "Stable pairs / selected",
+         str.tostring(
+             stableNodeClusters.size()) +
+         " / " +
+         str.tostring(
+             structureKinds.size()),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         18,
+         "Nodes / shelves / visible",
+         str.tostring(
+             pairedStructureCount) +
+         " / " +
+         str.tostring(
+             standaloneStructureCount) +
+         " / " +
+         str.tostring(
+             visibleStructureCount),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         19,
+         "Structure 1",
+         structureOneText,
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         20,
+         "Structure 2",
+         structureTwoText,
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         21,
+         "Structural bounds",
+         structuralStateText,
+         useStructuralBoundsInput ?
+          warningBg : rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         22,
+         "Cluster / endpoint radii",
+         str.tostring(
+             consensusClusterBaseRowsInput,
+             "#.##") +
+         " / 1.00 base rows",
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         23,
+         "Local pair guard",
+         "nearest clean peak≥10%; P>0; 3-" +
+         str.tostring(
+             maximumNodeWidthBaseRowsInput,
+             "#.0") +
+         " base rows",
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         24,
+         "Geometry gates",
+         str.tostring(
+             minimumRatioInput,
+             "#.00") +
+         "x; W/J≤" +
+         str.tostring(
+             maximumNoiseFractionInput,
+             "#.00") +
+         "; dense≥" +
+         str.tostring(
+             minimumDenseFractionInput,
+             "#.00") +
+         "; z≥" +
+         str.tostring(
+             minimumRobustZInput,
+             "#.00"),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         25,
+         "Suppressed at bounds",
+         str.tostring(
+             structurallySuppressedCount),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         26,
+         "Maximum structures",
+         str.tostring(
+             maximumStructuresInput),
+         rowBg)
+    diagnosticRow(
+         diagnosticTable,
+         27,
+         "Warning",
+         "Research only; compare expert marks",
+         warningBg)

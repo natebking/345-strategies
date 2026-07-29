@@ -1,0 +1,29 @@
+{
+  "schema": "vpx.session-plan/1",
+  "matrix_id": "VP0-GRID-1-ESU2026-20260724",
+  "logical_run_prefix": "vp0-grid-1",
+  "created_utc": "2026-07-25T14:00:00Z",
+  "display_timeframes": [
+    1,
+    5,
+    15,
+    60
+  ],
+  "sessions": [
+    {
+      "session_key": "esu2026-20260724",
+      "warmup_start_ms": 1784813400000,
+      "measurement": {
+        "session_id": "ESU2026-RTH-2026-07-24",
+        "start_ms": 1784899800000,
+        "end_ms": 1784924100000,
+        "bar_anchor_ms": 0
+      },
+      "manual_profile": {
+        "start_ms": 1784813400000,
+        "end_ms": 1784837700000,
+        "expected_minutes": 405
+      }
+    }
+  ]
+}
