@@ -5,8 +5,8 @@ Everything to paste into the Publish window. **The description is ONE-SHOT: Trad
 ## Settings
 
 - **Privacy:** Public · **Visibility:** Open
-- **Title:** `TheStrat Suite [Open Source] — Multi-Timeframe Signals, Targets & Stop Loss`
-  (76 chars; limit is ~128, keep under 100. `[Open Source]` sits right after the brand so it survives truncation and disambiguates from the legacy listing, whose title can't change. "Stop Loss" over "FTFC" in the title: bigger query, real feature; FTFC stays in the description for the niche searchers. Fallback if a field ever caps shorter: swap "Multi-Timeframe" → "MTF".)
+- **Title:** `TheStrat Suite [Open Source] — MTF Signals, Targets & Stop Loss`
+  (63 chars — the publish field caps at ~63–64, measured 2026-07-30. `[Open Source]` sits right after the brand so it survives truncation and disambiguates from the legacy listing, whose title can't change. "MTF" is the standard trader abbreviation and a searched term itself; "Multi-Timeframe" stays spelled out in the description line 1 and the Multi-timeframe category. "Stop Loss" over "FTFC": bigger query, real feature; FTFC stays in the description.)
 - **Categories:** Candlestick analysis · Multi-timeframe · Support and Resistance (or keep Pivot Points and Levels — both defensible; S&R has the larger browse audience)
 - **Tags:** `thestrat`, `strat`, `stoploss`, `multitimeframe`, `priceaction`, `insidebar`, `ftfc`, `candlestickpatterns`, `alertsignals` (all genuinely relevant — irrelevant tags are a moderation risk)
 
