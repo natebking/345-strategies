@@ -1,6 +1,6 @@
 # Repaint Prevention
 
-How TheStrat Suite guarantees that what you saw live is what you see after a reload — and the rules any contribution must follow to keep it that way.
+How TheStrat Suite guarantees that what you saw live is what you see after a reload — and the rules any contribution must follow to keep it that way. Every rule here came out of a bug I shipped, found, and fixed; the `FIX` tags are the receipts.
 
 Written against `pine/TheStratSuite_v2.2.6-split.pine`. Code references are function names and `FIX` tags; grep the source for them.
 

@@ -51,7 +51,7 @@ Note the two-layer design: **detection** (Advanced → Failing 2 Detection, on b
 
 ### 3-2 Expansions
 
-`C1` was an outside bar — both sides ran, indecision. `CC` committing to one side resolves it, often powerfully if the 3 shook out weak hands. Filters: HAM/SHO, FTFC.
+`C1` was an outside bar — both sides ran, indecision. `CC` committing to one side resolves it, and the move often runs hard if the 3 shook out weak hands. Filters: HAM/SHO, FTFC.
 
 ### Outside Bars (3 Exp)
 
@@ -62,7 +62,7 @@ Note the two-layer design: **detection** (Advanced → Failing 2 Detection, on b
 ## Cross-cutting filters
 
 - **HAM/SHO** — per-family toggle requiring `C1` conviction (see `bar-types.md` for the three definitions).
-- **FTFC** — per-family toggle requiring all monitored timeframes to agree on direction (close vs open). Ships off everywhere: powerful, deliberately opt-in.
+- **FTFC** — per-family toggle requiring all monitored timeframes to agree on direction (close vs open). Ships off everywhere. It filters hard, so I made it opt-in.
 - **Lead Signal** (Filters → Lead Signal, off) — the highest timeframe with a signal in force becomes the Lead; lower timeframes only show setups aligned with it. Counter-trend noise on the 15m stops fighting your daily.
 - **Domino** (always computed) — consecutive inside bars stacked across timeframes, flagged in the table and alertable. A market coiled on multiple timeframes at once.
 
