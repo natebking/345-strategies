@@ -20,7 +20,12 @@ The repo is currently **private**. This is everything between here and flipping 
 - [ ] **Flip visibility**: GitHub → Settings → Danger Zone → Change visibility → Public.
 - [ ] **After the flip**: add topics (`pine-script`, `tradingview`, `thestrat`, `trading`, `indicator`) so it's findable.
 - [ ] **After the flip**: publish the canonical URL `github.com/natebking/345-strategies` anywhere you link the repo (thestratsuite.com, TV listings). The old `thestratsuite` URL redirects, but don't rely on it in public copy.
-- [ ] **TradingView publication decision**: keep the TV listing closed-source, or republish as an open-source TV script? TV publishes open scripts under MPL-2.0 by default, so the licenses align if you do. This is a business call — the repo going public doesn't force either answer.
+- [ ] **TradingView open-source migration** (verified against TV docs 2026-07-30: a published script's privacy/visibility are PERMANENT — update dialog greys them out; no conversion path exists):
+  - [ ] Flip this repo public first, so the TV description's GitHub link resolves.
+  - [ ] Publish v3.0.0 as a NEW publication: Privacy = Public, Visibility = Open. TV applies MPL-2.0 to open scripts by default — matches this repo's license automatically.
+  - [ ] New description explains the lineage (replaces the invite-only listing; now free and open source) per the house rules' explain-in-description pattern, plus the SpinTrades story and the repo link.
+  - [ ] Repurpose the old invite-only listing as a signpost: final update with release notes pointing to the new listing; edit description and Author's instructions ("Get Access" → "now free and open source"). It cannot be deleted; existing invited users keep working.
+  - [ ] After TV publish: retitle CHANGELOG [Unreleased] → dated [3.0.0].
 - [ ] **Lite/paid positioning**: decide how the existing TV listings relate to the open repo. Deliberately not addressed anywhere in the repo docs.
 
 ## Deliberately excluded from the repo
