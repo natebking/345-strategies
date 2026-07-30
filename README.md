@@ -1,16 +1,22 @@
-# TheStrat Suite
+# 345 Strategies
 
-Multi-timeframe price action indicator for TradingView (Pine Script v6), implementing Rob Smith's TheStrat methodology. Six configurable timeframes on one chart: bar classification, signal detection with magnitude and exhaustion targets, Full Timeframe Continuity, stop levels, Domino detection, consolidated alerts, and a live multi-timeframe data table.
+Open-source price-action trading tools for TradingView, built and maintained by 345 Strategies. The flagship is **TheStrat Suite**; sibling tools and research tracks live alongside it.
+
+**What counts as "TheStrat Suite":** whatever ships inside the one TheStrat Suite indicator script on TradingView. Tools that ship as their own scripts are siblings under this roof with their own names — if one later merges into the indicator, it joins the Suite. Distribution decides, not methodology.
+
+## TheStrat Suite — flagship indicator
+
+Multi-timeframe price action indicator (Pine Script v6), implementing Rob Smith's TheStrat methodology. Six configurable timeframes on one chart: bar classification, signal detection with magnitude and exhaustion targets, Full Timeframe Continuity, stop levels, Domino detection, consolidated alerts, and a live multi-timeframe data table.
 
 Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 
-## Quick start
+### Quick start
 
 1. Copy `pine/TheStratSuite_v2.2.7-split.pine` into the TradingView Pine editor and add it to a chart.
 2. Pick a Timeframe Preset (TheStrat Classic, Scalp, Day Trade, Futures/Crypto, Swing Trade, Investing) — or set Custom and configure the six slots yourself.
 3. Read `docs/concepts/bar-types.md` and `docs/concepts/signals.md` to learn what you're looking at.
 
-## Contents
+## Repository contents
 
 ### `pine/` — indicator source (newest first)
 

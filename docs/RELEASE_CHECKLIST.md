@@ -9,6 +9,7 @@ The repo is currently **private**. This is everything between here and flipping 
 - [x] Launch docs: `concepts/bar-types.md`, `concepts/signals.md`, `engineering/repaint-prevention.md`, `engineering/htf-correctness.md`, docs index.
 - [x] NOTATION-1 shipped in v2.2.7-split (canonical F2u/F2d, matches priceactionapi).
 - [x] Scrub grep of tracked files: no Whop/pricing/subscription references, no PASS/StratDB references. Two local `/Users/…` paths found in docs and removed (DESIGN_CONSTRAINTS.md, Settings Reference §note).
+- [x] Repo renamed `thestratsuite` → `345-strategies` (2026-07-30): the repo is the 345 Strategies workshop; "TheStrat Suite" names the indicator product only (boundary rule in root README). Old GitHub URLs and remotes redirect automatically.
 
 ## Nate — before or at the flip
 
@@ -17,6 +18,7 @@ The repo is currently **private**. This is everything between here and flipping 
 - [ ] **Git history call.** The pre-rewrite README (with "private archive / Confidential" wording) and the removed local paths remain visible in commit history. Low risk — nothing sensitive beyond framing and a home-directory path — but it's your name on it. Options: accept as-is (recommended; rewriting history is churn for no real gain) or squash-recreate the repo before flipping.
 - [ ] **Flip visibility**: GitHub → Settings → Danger Zone → Change visibility → Public.
 - [ ] **After the flip**: add topics (`pine-script`, `tradingview`, `thestrat`, `trading`, `indicator`) so it's findable.
+- [ ] **After the flip**: publish the canonical URL `github.com/natebking/345-strategies` anywhere you link the repo (thestratsuite.com, TV listings). The old `thestratsuite` URL redirects, but don't rely on it in public copy.
 - [ ] **TradingView publication decision**: keep the TV listing closed-source, or republish as an open-source TV script? TV publishes open scripts under MPL-2.0 by default, so the licenses align if you do. This is a business call — the repo going public doesn't force either answer.
 - [ ] **Lite/paid positioning**: decide how the existing TV listings relate to the open repo. Deliberately not addressed anywhere in the repo docs.
 
