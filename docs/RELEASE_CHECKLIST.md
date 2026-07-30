@@ -27,4 +27,4 @@ The repo is currently **private**. This is everything between here and flipping 
 
 ## Post-launch docs backlog
 
-Tracked in `docs/README.md`: architecture.md, drawing-decisions.md, rendering.md, performance.md, CHANGELOG backfill, Settings Reference refresh to v2.2.7, CONTRIBUTING.md, remaining concepts docs.
+Done (2026-07-28) — the full backlog is written and verified: architecture.md, drawing-decisions.md, rendering.md, performance.md, CHANGELOG backfill, Settings Reference refreshed to v2.2.7, CONTRIBUTING.md, and the remaining concepts docs (ftfc, targets-and-stops, reading-labels). `docs/README.md` is the current index.

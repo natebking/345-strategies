@@ -72,4 +72,4 @@ With Label Style = Universal, the same signals read in plain language: `↑REVER
 
 ---
 
-*Why a given line draws or doesn't: `engineering/drawing-decisions.md` (planned). Targets and stops: `targets-and-stops.md` (planned).*
+*Why a given line draws or doesn't: `../engineering/drawing-decisions.md`. Targets and stops: `targets-and-stops.md`.*
