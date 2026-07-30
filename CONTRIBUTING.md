@@ -101,6 +101,16 @@ State what you tested in the PR. "Compiles" is not a test result.
 
 Docs follow the code's referencing rule: **function names and `FIX` tags, never line numbers** — line numbers rot with every diff, tags don't. Engineering docs state which build they were written against, and they end with a contributor checklist; keep both conventions when adding one. The docs index and roadmap live in `docs/README.md`.
 
+### Voice
+
+Everything public-facing in this repo — docs, README, release notes, listing copy — is written in the author's voice. Hold contributions to the same rules:
+
+- First person and direct where the author speaks: "I built this because...", never "Introducing...".
+- No promotional language. If a sentence still works after deleting "powerful" or "seamless", the word was decoration — cut it.
+- No exclamation points in prose. No emoji, except when quoting the indicator's own output (alert labels emit 🟢/🔴; quoting output is documentation, not decoration).
+- Short, plain sentences. Technical claims over adjectives. Prefer periods and commas; keep em dashes rare.
+- Release notes: lead with fixes on patches, features on majors. Short.
+
 ---
 
 ## Pre-publication scrub checklist

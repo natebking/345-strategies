@@ -1,6 +1,6 @@
 # Bar Types & Notation
 
-Every candle in TheStrat is classified by one question: **what did it do to the previous candle's range?** This doc defines the three structures, the notation the Suite uses for them, and the rules that resolve the ambiguities — including the ones the broader Strat community has never standardized.
+Every candle in TheStrat is classified by one question: **what did it do to the previous candle's range?** This doc defines the three structures, the notation the Suite uses for them, and the rules that resolve the ambiguities. Where the broader Strat community never standardized something, I picked a rule and wrote down why.
 
 Applies to v2.2.7-split and later. (v2.2.6 and earlier used lowercase `f2u`/`f2d` for a live Failing 2 — see the notation rule below for why that was retired.)
 
