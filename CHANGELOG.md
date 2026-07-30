@@ -10,9 +10,11 @@ How to read this file:
 
 ## [Unreleased]
 
-Planned for v3:
+Working build: `pine/TheStratSuite_v3.0.0.pine` — the v3 release candidate (version strings already bumped). On TradingView publish, retitle this section to a dated `[3.0.0]` heading per the contributor checklist.
 
-- Bar coloring settings — paint chart candles by their Strat classification (inside 1, directional 2u/2d, outside 3, Failing 2s), configurable per family. The one price-action feature from the pre-Suite standalone scripts that hasn't been folded in yet.
+### Added
+
+- Bar coloring — chart candles painted by their Strat classification (inside 1, directional 2u/2d, outside 3u/3d, Failing 2s), toggleable per family, or by Full Timeframe Continuity (up / down / conflict, with optional Failing-2 flip highlighting). The one price-action feature from the pre-Suite standalone scripts that hadn't been folded in. New settings group **Display - Bar Coloring**; off by default. Strat mode reuses the data table's CC classifier (`detectBarTypeAndFailed`) on the chart bar, so candles and table can never disagree and the Failing 2 method/enable settings govern candles automatically; family colors follow the existing Style inputs. FTFC mode deliberately re-grades each historical bar by its own close against the served period opens (`calculateFTFC` re-run with chart close) instead of reading `ftfc_up`/`ftfc_down`, whose lookahead closes would paint history with each period's *final* direction; on the live bar the two are identical, so candles always match the table's FTFC row. The flip highlight rebuilds each slot's intra-period range from chart bars (running H/L keyed on the served period-open time; see `paintSlotFailed2`) so historical flips are graded honestly too. (`BARCOLOR-1`)
 
 ## [2.2.7-split] — 2026-07-21
 
