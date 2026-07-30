@@ -14,7 +14,7 @@ The repo is currently **private**. This is everything between here and flipping 
 
 ## Nate — before or at the flip
 
-- [ ] **Paste v2.2.7-split into the TradingView Pine editor.** The repo is ahead of the live indicator until this happens. The paste also carries the new MPL header.
+- [x] **Sync the TradingView Pine editor with the repo.** Done 2026-07-30 at v3.0.0 (superseded the v2.2.7 paste): compile-verified and running on chart. Note: this is the *editor* copy — publishing the 3.0.0 update to the TV listing is a separate go decision; on publish, retitle CHANGELOG `[Unreleased]` to a dated `[3.0.0]` heading.
 - [ ] **Read the docs with fresh eyes** — they were drafted from the code and fix history; you'll catch voice or emphasis issues I can't.
 - [ ] **Git history call.** The pre-rewrite README (with "private archive / Confidential" wording) and the removed local paths remain visible in commit history. Low risk — nothing sensitive beyond framing and a home-directory path — but it's your name on it. Options: accept as-is (recommended; rewriting history is churn for no real gain) or squash-recreate the repo before flipping.
 - [ ] **Flip visibility**: GitHub → Settings → Danger Zone → Change visibility → Public.
