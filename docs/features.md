@@ -1,6 +1,6 @@
-# Features, One by One
+# Feature Reference
 
-Every feature in TheStrat Suite: what it does, where its settings live, and which doc goes deeper. This is the reference page — when someone asks "does it do X," the answer is on this page or it doesn't exist yet.
+Every feature in TheStrat Suite: what it does, where its settings live, and which doc covers it in depth.
 
 Applies to v3.0.0. Settings paths refer to the indicator's settings panel groups.
 
