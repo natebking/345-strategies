@@ -10,6 +10,7 @@ The repo is currently **private**. This is everything between here and flipping 
 - [x] NOTATION-1 shipped in v2.2.7-split (canonical F2u/F2d, matches priceactionapi).
 - [x] Scrub grep of tracked files: no Whop/pricing/subscription references, no PASS/StratDB references. Two local `/Users/…` paths found in docs and removed (DESIGN_CONSTRAINTS.md, Settings Reference §note).
 - [x] Repo renamed `thestratsuite` → `345-strategies` (2026-07-30): the repo is the 345 Strategies workshop; "TheStrat Suite" names the indicator product only (boundary rule in root README). Old GitHub URLs and remotes redirect automatically.
+  - **Standing rule: never create a new repo named `natebking/thestratsuite`.** The redirect only lives while the old name stays unused — reusing it would silently capture every old link and clone remote.
 
 ## Nate — before or at the flip
 
