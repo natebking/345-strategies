@@ -25,6 +25,7 @@ Engineering docs reference the code by function name and `FIX` tag (grep-able), 
 | `engineering/performance.md` | Builder | The cost model: calc_bars_count tiers, tuple security calls, islast gating, bounded scans |
 | `DESIGN_CONSTRAINTS.md` | Builder | Intentional design decisions — what reviewers must not flag as bugs |
 | `v2.2.3_holiday_glue_fix.md` | Builder | Postmortem: CME holiday-glued bars (GLUE-1 / GLUE-2b) |
+| `features.md` | Both | Feature-by-feature reference: every feature, its settings path, and the doc that goes deeper |
 | Root `README.md` + `LICENSE` (MPL-2.0) | Both | Public-facing; confidential framing removed 2026-07-21 |
 | Root `CHANGELOG.md` | Both | Full version history backfilled from snapshots and `FIX` comments, Keep a Changelog format |
 | Root `CONTRIBUTING.md` | Builder | How to contribute: required reading, FIX-tag conventions, manual verification workflow, PR checklist |
