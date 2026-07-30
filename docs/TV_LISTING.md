@@ -50,9 +50,20 @@ Most Strat indicators mark bar numbers. This one consolidates six timeframes int
 
 OPEN SOURCE
 
-Full source, engineering docs (no-repaint rules, multi-timeframe correctness), changelog, and settings reference: github.com/natebking/345-strategies — licensed MPL-2.0. Guides at TheStratSuite.com. This publication replaces my earlier invite-only listing of the same name; the Suite is now free for everyone.
+The complete source is published under the Mozilla Public License 2.0, together with the engineering documentation (the no-repaint contract, the multi-timeframe correctness rules), a full changelog, and a settings reference. The repository and setup-guide links are in my signature and on my profile. This publication replaces my earlier invite-only listing of the same name; the Suite is now free for everyone.
 
 ---
+
+## Links: what TradingView allows (verified vs House Rules, 2026-07-30)
+
+- **External links/references are BANNED in descriptions, release notes, comments, and code** — the promotion rule names "links or references to any website" across "all types of publications and updates … script release notes." No open-source or GitHub carve-out exists. This is why the description above contains no URLs.
+- **The Signature field (Premium+) is the sanctioned home**: it renders under every script and idea. BEFORE publishing, set the signature to carry both links, e.g. `TheStratSuite.com · github.com/natebking/345-strategies`, and put them on the profile About page too.
+- **TV-internal references are safe by name**: "search 'TheStrat Suite' (open-source) on my profile @SpinTrades." Use this form in release notes instead of URLs.
+- Exception that stays: the invite-only **Author's Instructions** field is designed for a vendor access link (the current "Get Access: TheStratSuite.com" has lived there unmoderated) — fine to keep using it for the legacy signpost.
+
+## Release-notes template for the legacy listing's final update (link-free)
+
+> TheStrat Suite is now free and open source. This invite-only listing is legacy — existing users keep access and nothing changes on your charts. The current version is published as an open-source script: find "TheStrat Suite" on my profile (@SpinTrades), marked with the OPEN-SOURCE badge. Repository and documentation links are in my signature.
 
 ## Legacy listing signpost (old invite-only publication)
 
