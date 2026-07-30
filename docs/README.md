@@ -1,41 +1,45 @@
 # TheStrat Suite — Documentation
 
-Docs index and roadmap for the open-source release prep. Two audiences, two folders:
+Docs index for the open-source release. Two audiences, two folders:
 
-- **`concepts/`** (planned) — for traders using the indicator. What the signals mean, how to read the chart, how to configure it.
+- **`concepts/`** — for traders using the indicator. What the signals mean, how to read the chart, how to configure it.
 - **`engineering/`** — for builders forking or extending the script. How the engine works and the rules that keep it correct.
 
-Engineering docs reference the code by function name and `FIX` tag (grep-able), not line number. Written against `pine/TheStratSuite_v2.2.6-split.pine`.
+Engineering docs reference the code by function name and `FIX` tag (grep-able), not line number. Written against `pine/TheStratSuite_v2.2.7-split.pine`.
 
 ## Existing docs
 
 | Doc | Audience | Notes |
 |---|---|---|
-| `engineering/repaint-prevention.md` | Builder | The no-repaint contract: 7 rules + contributor checklist |
-| `engineering/htf-correctness.md` | Builder | Reading 6 TFs from one chart: validTimeframe gate, straddle/glue handling, +12h rule, daily reconstruction, preview mode |
 | `concepts/bar-types.md` | Trader | The three structures, the u/d overload, Failing 2s + NOTATION-1 casing rule, HAM/SHO, combo strings, the canonical tuple |
 | `concepts/signals.md` | Trader | The seven signal types with defaults and filters, potential vs in-force mechanics, detection-vs-signal F2 nuance, Universal names |
-| Root `README.md` + `LICENSE` (MPL-2.0) | Both | Public-facing; confidential framing removed 2026-07-21 |
-| `RELEASE_CHECKLIST.md` | — | Pre-flight for the visibility flip: what's done, what's Nate's call |
-| `v2.2.3_holiday_glue_fix.md` | Builder | Postmortem: CME holiday-glued bars (GLUE-1 / GLUE-2b) |
+| `concepts/ftfc.md` | Trader | Full Timeframe Continuity: the sign channel, the voting slots, display and alert integration |
+| `concepts/targets-and-stops.md` | Trader | Magnitude, exhaustion, and stop levels; Take Action Windows; every setting that touches them |
+| `concepts/reading-labels.md` | Trader | Decoder for everything drawn: label anatomy, colors, the data table row by row, alert message format |
+| `TheStratSuite_v2.2.7_Settings_Reference.md` | Trader | Full settings reference for v2.2.7-split, every input in panel order |
+| `engineering/architecture.md` | Builder | The pipeline: security → preview shift → compute → filter → render; where each invariant lives |
+| `engineering/repaint-prevention.md` | Builder | The no-repaint contract: 7 rules + contributor checklist |
+| `engineering/htf-correctness.md` | Builder | Reading 6 TFs from one chart: validTimeframe gate, straddle/glue handling, +12h rule, daily reconstruction, preview mode |
+| `engineering/drawing-decisions.md` | Builder | Why a level is (or isn't) on the chart: the shouldDrawC1Level funnel and every suppression rule |
+| `engineering/rendering.md` | Builder | x/y anchoring, update-in-place object lifetimes, the label pool, consolidation passes, the object budget |
+| `engineering/performance.md` | Builder | The cost model: calc_bars_count tiers, tuple security calls, islast gating, bounded scans |
 | `DESIGN_CONSTRAINTS.md` | Builder | Intentional design decisions — what reviewers must not flag as bugs |
-| `TheStratSuite_v2.2.1_Settings_Reference.md` | Trader | Full settings reference (written for v2.2.1; needs a v2.2.6 refresh pass) |
+| `v2.2.3_holiday_glue_fix.md` | Builder | Postmortem: CME holiday-glued bars (GLUE-1 / GLUE-2b) |
+| Root `README.md` + `LICENSE` (MPL-2.0) | Both | Public-facing; confidential framing removed 2026-07-21 |
+| Root `CHANGELOG.md` | Both | Full version history backfilled from snapshots and `FIX` comments, Keep a Changelog format |
+| Root `CONTRIBUTING.md` | Builder | How to contribute: required reading, FIX-tag conventions, manual verification workflow, PR checklist |
+| `RELEASE_CHECKLIST.md` | — | Pre-flight for the visibility flip: prep done, release-moment items left for the maintainer |
+
+Research-track scripts are documented separately in `../pine/research/README.md`.
 
 ## Planned
 
-| Doc | Audience | Priority |
-|---|---|---|
-| `engineering/architecture.md` — the pipeline: security → preview shift → compute → filter → render | Builder | Fast-follow |
-| `engineering/drawing-decisions.md` — shouldDrawC1Level tree, suppression rules | Builder | Fast-follow |
-| `engineering/rendering.md` — x/y anchoring, update-in-place, label pool, consolidation | Builder | Fast-follow |
-| `CHANGELOG.md` backfill from release notes + FIX history | Both | Fast-follow |
-| `concepts/ftfc.md`, `concepts/targets-and-stops.md`, `concepts/reading-labels.md` | Trader | Later |
-| `engineering/performance.md` — calc_bars_count tiers, tuple security calls, islast gating | Builder | Later |
-| `CONTRIBUTING.md` + pre-publication scrub checklist (pricing refs, business details) | — | Later |
+The launch docs backlog is fully written; new docs get a row above when they land.
+
+Feature roadmap: **v3 adds bar coloring settings** (candles painted by Strat classification — the last piece of the pre-Suite standalone scripts not yet folded in). Tracked in the root `CHANGELOG.md` under Unreleased; its trader doc lands here alongside the feature.
 
 ## Source material
 
-- `FIX` comments in `pine/TheStratSuite_v2.2.6-split.pine` — each tag documents a solved bug and its rule
-- `DESIGN_CONSTRAINTS.md` — the invariants list; feeds `architecture.md`
-- `v2.2.3_holiday_glue_fix.md` — feeds `htf-correctness.md`
-- `TheStratSuite_Project.md` — project history and business context; lives **outside this repo** (local working folder) deliberately, pending the pre-publication scrub
+- `FIX` comments in `pine/TheStratSuite_v2.2.7-split.pine` — each tag documents a solved bug and its rule
+- `DESIGN_CONSTRAINTS.md` — the invariants list; feeds `engineering/architecture.md`
+- `v2.2.3_holiday_glue_fix.md` — feeds `engineering/htf-correctness.md`
