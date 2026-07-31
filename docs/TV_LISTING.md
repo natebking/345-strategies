@@ -34,6 +34,8 @@ WHAT IT DRAWS
 - A live data table of all six timeframes, in Strat notation or a plain-language Universal mode
 - New in v3: bar coloring by Strat classification or by FTFC
 
+Levels don't just appear and disappear — they adapt. A target becoming a trigger, a level being hit, or a setup invalidating all produce specific visual feedback.
+
 HOW TO USE IT
 
 1. Add it to your chart and pick a timeframe preset: TheStrat Classic, Scalp, Day Trade, Futures/Crypto, Swing Trade, or Investing.
@@ -46,7 +48,7 @@ No. Completed-bar signals are built from confirmed higher-timeframe data and do 
 
 WHAT MAKES IT DIFFERENT
 
-Most Strat indicators mark bar numbers. This one consolidates six timeframes into a single decision view: signal detection with targets and stops attached, FTFC and Lead Signal filtering, preview mode for planning before the open, and a documented no-repaint contract. It is the culmination of my price action work on TradingView.
+Most Strat indicators mark bar numbers. This one consolidates six timeframes into a single decision view: signal detection with targets and stop losses attached, FTFC and Lead Signal filtering, preview mode for planning before the open, and a documented no-repaint contract. The guiding principle is to show only the most valuable information — the indicator decides what is relevant and worth displaying at any given moment rather than cluttering the chart with every possible level. It is the culmination of my price action work on TradingView.
 
 OPEN SOURCE
 
@@ -66,6 +68,8 @@ The complete source is published under the Mozilla Public License 2.0, together 
 > TheStrat Suite is now free and open source. This invite-only listing is legacy — existing users keep access and nothing changes on your charts. The current version is published as an open-source script: find "TheStrat Suite" on my profile (@SpinTrades), marked with the OPEN-SOURCE badge. Repository and documentation links are in my signature.
 
 ## Legacy listing signpost (old invite-only publication)
+
+Legacy listing URL: https://www.tradingview.com/script/NNDIyA45-TheStrat-Suite-Multi-Timeframe-Price-Action-Signals-w-Alerts/ ("TheStrat Suite: Multi-Timeframe Price Action Signals w/ Alerts"). Its original benefit copy is preserved in the local working folder (`reference-original-tv-listing.md`) as source material.
 
 Its description and title are locked. Available levers, in order of reliability:
 
