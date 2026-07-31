@@ -2,7 +2,7 @@
 
 The pipeline a bar of data travels from `request.security` to pixels — and where each engineering invariant lives along the way. If you are forking or contributing, read this first; the companion docs go deep on the two hardest stages.
 
-Written against `pine/TheStratSuite_v2.2.7-split.pine`. Code references are function names, `SECTION` banners, and `FIX` tags; grep the source for them. Anti-repaint rules: `repaint-prevention.md`. Security-call traps: `htf-correctness.md`. Intentional design decisions a reviewer must not "fix": `../DESIGN_CONSTRAINTS.md`.
+Written against `pine/TheStratSuite_v3.0.0.pine`. Code references are function names, `SECTION` banners, and `FIX` tags; grep the source for them. Anti-repaint rules: `repaint-prevention.md`. Security-call traps: `htf-correctness.md`. Intentional design decisions a reviewer must not "fix": `../DESIGN_CONSTRAINTS.md`.
 
 ---
 
@@ -29,12 +29,15 @@ Written against `pine/TheStratSuite_v2.2.7-split.pine`. Code references are func
    │
    ▼
  ALERTS                  edge detection on persisted was-state arrays
+   │
+   ▼
+ PAINT  (every bar)      chart-bar Strat classification / FTFC re-grade → barcolor()
 ```
 
 Two cadences run through everything (`../DESIGN_CONSTRAINTS.md` item 5):
 
 - **State tracking runs on every bar.** The compute loop executes for all of history so `var` latches (crossed flags, sticky stops, period bookkeeping) rebuild identically on reload.
-- **Rendering runs only on `barstate.islast`.** Nothing is ever drawn on historical bars — there is no historical signal trail to repaint (`repaint-prevention.md`).
+- **Rendering runs only on `barstate.islast`.** No drawing object is ever created on a historical bar — there is no historical signal trail to repaint (`repaint-prevention.md`). The one stated exception is Stage 7's bar coloring, which paints (but never draws objects on) historical candles under the repaint doc's reload-stability rule.
 
 The heavy classification work inside `computeSignalState` is additionally gated `barstate.islast or showStopLevels` (`FIX P1-a`): with stops off (the default) history pays only for the latches; with stops on, detection runs every bar because the sticky-stop lock must be rebuildable from history.
 
@@ -58,6 +61,7 @@ The file is organized into grep-able `SECTION` banners. Mapping to pipeline stag
 | `SECTION 11` | data table, Domino calculation | render |
 | `SECTION 12` | debug panel | render |
 | `SECTION 13` | was-state arrays, `alert()`, `alertcondition`s | alerts |
+| `SECTION 14` | `getChartBarColor`, `paintSlotFailed2`, FTFC re-grade, `barcolor()` | paint |
 
 ---
 
@@ -134,6 +138,12 @@ All drawing happens under `barstate.islast`, in source order:
 ## Stage 6 — Alerts: edges of persisted state
 
 `SECTION 13` never asks "is it active?" — only "did it just become active?". Per-slot `was*` arrays reset on `realPeriodTime` change (`FIX P1-c`), update unconditionally even when a TF's alert checkbox is off (`FIX U2`), and are snapshotted before the update loop so the per-TF `alertcondition`s see true edges. Preview/straddled slots never alert (`slotPreview`, `okA1`–`okA6`). The consolidated `alert()` fires once per bar with the assembled message. The full rule set is `repaint-prevention.md` Rule 6.
+
+---
+
+## Stage 7 — Bar coloring: every bar, no drawing objects
+
+`SECTION 14` (`BARCOLOR-1`, off by default) runs in the main context on **every** bar — `barcolor()` paints history, so its classification cannot be islast-gated. Strat Candles mode reuses `detectBarTypeAndFailed` — the data table's CC classifier — on the chart bar itself, so candle paint and table notation cannot disagree. FTFC Candles mode re-runs `calculateFTFC` with the chart bar's own close against the served HTF opens (never the lookahead-final HTF closes), and `paintSlotFailed2` rebuilds each slot's intra-period range from chart bars for the flip highlight. No lines, labels, or boxes are involved, so the object budget is untouched. This is the one stated exception to "rendering runs only on islast," and it is safe because it obeys `repaint-prevention.md` Rule 8: historical paint reads only series that evaluate identically live and on reload.
 
 ---
 

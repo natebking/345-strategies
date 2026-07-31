@@ -2,7 +2,7 @@
 
 How TheStrat Suite guarantees that what you saw live is what you see after a reload — and the rules any contribution must follow to keep it that way. Every rule here came out of a bug I shipped, found, and fixed; the `FIX` tags are the receipts.
 
-Written against `pine/TheStratSuite_v2.2.6-split.pine`. Code references are function names and `FIX` tags; grep the source for them.
+Written against `pine/TheStratSuite_v3.0.0.pine`. Code references are function names and `FIX` tags; grep the source for them.
 
 ---
 
@@ -18,11 +18,13 @@ Every rule below exists to eliminate 1 and 2 while keeping 3 deliberate and cont
 
 ---
 
-## The architectural stance: nothing historical is drawn
+## The architectural stance: no historical drawing objects
 
-All lines, boxes, labels, and table cells are created or updated **only on the last bar** (`barstate.islast`), from state latched per higher-timeframe (HTF) period. The Suite never paints signals onto past bars.
+All lines, boxes, labels, and table cells are created or updated **only on the last bar** (`barstate.islast`), from state latched per higher-timeframe (HTF) period. The Suite never draws signal objects onto past bars.
 
-This is the single biggest anti-repaint decision. There is no historical signal trail that could silently differ after a reload. The only surface that must be reproducible is the *current period's* state — and every rule below exists to make that state rebuildable from bar history alone.
+This is the single biggest anti-repaint decision. There is no historical trail of drawing objects that could silently differ after a reload. The only object surface that must be reproducible is the *current period's* state — and every rule below exists to make that state rebuildable from bar history alone.
+
+One deliberate historical surface exists as of v3: **bar coloring** (`BARCOLOR-1`, `SECTION 14`) paints classification onto every historical candle via `barcolor()`. It creates no drawing objects, and it is allowed precisely because it obeys Rule 8 — historical paint may read only series that evaluate identically live and on reload.
 
 ---
 
@@ -124,6 +126,22 @@ Two sharp edges, both learned the hard way:
 
 ---
 
+## Rule 8 — Historical paint must be reload-stable
+
+v3's bar coloring (`BARCOLOR-1`, `SECTION 14`) is the one surface that touches historical bars: `barcolor()` paints every candle by its Strat classification or FTFC grade. Painted history is only honest if every input evaluates identically live and on reload, which restricts what historical paint may read:
+
+- **Safe:** the chart bar's own OHLC; completed HTF bars at offset `[1]`+ (already settled per Rule 1); and served HTF period *opens* — an open never changes after its period starts, so it is period-stable under `lookahead_on`.
+- **Unsafe:** served `[0]` HTF closes and extremes. On historical bars, `lookahead_on` serves the period's **final** values — painting history with `ftfc_up`/`ftfc_down` would color every bar of an up-closing day green from the open. Prophetic hindsight, not what the trader saw.
+
+The two consequences in `SECTION 14`:
+
+- **FTFC Candles re-runs `calculateFTFC`** with the chart bar's own close against the served HTF opens, grading every historical bar exactly as continuity stood at that bar's close. On the live bar the served HTF close *is* the live close, so the candle always agrees with the table's FTFC row.
+- **`paintSlotFailed2` rebuilds each slot's intra-period range from chart bars** — a running high/low keyed on the served period-open time — because the served CC high/low are final period values on historical bars, the same lookahead leak. `detectFailed2` then grades the honestly-reconstructed range with the same engine the signal path uses.
+
+Strat Candles needs no reconstruction: `detectBarTypeAndFailed` reads only the chart bar and its predecessor, identical live and on reload by definition.
+
+---
+
 ## Contributor checklist
 
 Before merging anything that adds state, reads security data, or emits alerts:
@@ -133,3 +151,4 @@ Before merging anything that adds state, reads security data, or emits alerts:
 3. Is every new `var` latch rebuilt from historical bars on reload — or is it `islast`-only *on purpose* and display-only (`FIX P1-a`)?
 4. Do new alerts edge off persisted was-state, reset on `realPeriodTime` change, update state even when muted, and stay silent in preview (`FIX P1-c`, `FIX U2`)?
 5. Does anything consult `timenow` outside a `barstate.islast` gate — and if it measures staleness, does it measure from `time_close` (`FIX GLUE-1`)?
+6. Does new historical paint read anything that differs live vs on reload — a served `[0]` close or extreme instead of chart-bar OHLC, completed `[1]`+ bars, or served period opens (`BARCOLOR-1`, Rule 8)?

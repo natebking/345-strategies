@@ -2,7 +2,7 @@
 
 Where the Suite spends its execution budget, the bounds designed into each cost center, and the gates that keep expensive work off the hot paths.
 
-Written against `pine/TheStratSuite_v2.2.7-split.pine`. Code references are function names and `FIX` tags; grep the source for them. Repaint rules decide *when* work is allowed to run — `repaint-prevention.md` — and this doc assumes them.
+Written against `pine/TheStratSuite_v3.0.0.pine`. Code references are function names and `FIX` tags; grep the source for them. Repaint rules decide *when* work is allowed to run — `repaint-prevention.md` — and this doc assumes them.
 
 ---
 
@@ -75,6 +75,7 @@ The main context runs at two speeds. **Every-bar** work exists only where reload
 - Tuple unpack into `TFRawData`, per-slot new-period detection, and the monotone crossed-flag latches — the head of `computeSignalState` (`FIX P0-1`).
 - Alert was-state maintenance (`FIX P1-c`, `FIX U2`) — boolean array writes. The expensive part, message assembly via `buildAlertLabel`, runs only when an edge actually fires, and its detail string is built lazily field-by-field (`FIX P1-j`).
 - Conditionally: full C1 pattern and F2 detection when `showStopLevels` is on (`FIX P1-a`). The gate is `barstate.islast or showStopLevels` — the sticky-stop latch must have run on the bars where the signal fired or a reload loses the lock, so the every-bar cost is paid, but only behind the toggle. Stops off (the default) keeps the cheap `islast`-only path.
+- Conditionally: bar coloring (`BARCOLOR-1`, off by default) — `barcolor()` paints history, so its classification must run on every bar. Strat mode costs one `detectBarTypeAndFailed` call per chart bar; FTFC mode one `calculateFTFC` re-run plus, with flip highlighting on, six `paintSlotFailed2` range updates.
 
 **Last-bar-only** work is everything else:
 
@@ -89,13 +90,13 @@ The two docs meet in one rule, read from opposite sides. Repaint says: a latch t
 
 ## Drawing objects: update in place, delete only on state change
 
-Three patterns, one principle — a drawing object's lifetime matches its level's lifetime, not a tick:
+One principle — a drawing object's lifetime matches its level's lifetime, not a tick. The cost claims:
 
-- **Lines and boxes** hold persistent references in `TimeframeData`. `updateOrCreateLine` / `updateOrCreateBox` mutate via setters on every last-bar tick and call `*.new` only when the reference is `na`; `deleteLine` / `deleteBox` run only when a level stops qualifying. This is the codified "conditional creation over create-then-hide" stance.
-- **Labels are pooled** (`FIX P1-i`). `LabelPoolT` keeps a flat array and a cursor; `acquireLabel` reuses an existing label via setters while below the pool's high-water mark and grows the pool only past it. After render, surplus is trimmed (`label.delete` while size exceeds `used`) — and the trim runs on every last bar even when labels are toggled off, so switching labels off drains the pool instead of stranding it. This replaced a delete-all-and-recreate-every-tick pattern, the single largest per-tick object churn removed in the 2.2.x line.
-- **The one deliberate delete path** is line suppression. `suppressLowerTFLines` maps rounded price → highest owning timeframe; a losing line is deleted *and its owner's field is nulled* through `nullSuppressedLine` (`FIX P1-h`), so the next tick's render recreates it cleanly via `line.new` instead of calling setters on a deleted object — a Pine v6 runtime hazard, not just a leak.
+- **Lines and boxes** hold persistent references, mutated via setters on last-bar ticks; deletion happens only when a level stops qualifying.
+- **Labels are pooled** (`FIX P1-i`): update-in-place, surplus trimmed after render. The pool replaced a delete-all-and-recreate-every-tick pattern — the single largest per-tick object churn removed in the 2.2.x line.
+- **Line suppression is the one sanctioned delete path** (`FIX P1-h`): a suppressed line is deleted and its owner's field nulled so the next tick recreates it cleanly.
 
-The `indicator()` declaration caps objects at `max_lines_count = 200`, `max_labels_count = 200`, `max_boxes_count = 200`, with `max_bars_back = 200` bounding main-context history buffers. Because nothing historical is ever drawn, the live population is bounded by enabled slots × level types — order tens, not hundreds. Treat the caps as headroom, not a mechanism: past the cap TradingView garbage-collects oldest-first, which would silently eat *live* objects. The invariant that actually protects the Suite is the last-bar-only architecture.
+No drawing object is ever created on a historical bar, so the live population is bounded by enabled slots × level types — order tens against the declared 200-per-type caps (boundaries table below). Mechanics, the budget inventory, and the P1-h/P1-i case studies: `rendering.md`.
 
 ---
 
@@ -116,6 +117,7 @@ Every `table.cell` write sits under a `barstate.islast` gate. A Pine table only 
 | Exhaustion scan | last 100 HTF bars × ≤ 47 iterations, early break | `findExhaustionLevels` |
 | Straddle reconstruction | last bar only; 6 slots × ≤ ~23 dailies | `FIX HTF-STRADDLE-1` (T3) |
 | Drawing objects | 200 per type declared; live population order tens | `indicator()` declaration |
+| Bar coloring | constant per-bar work; no `request.*` calls, no drawing objects (`barcolor` sits outside the 200-object caps) | `SECTION 14` |
 | Main-context history | `max_bars_back = 200` | `indicator()` declaration |
 
 These are *designed* bounds, not benchmark results — the repo records no Pine Profiler measurements. A contribution claiming a performance win should come with before/after evidence from TradingView's Pine Profiler, not reasoning alone.

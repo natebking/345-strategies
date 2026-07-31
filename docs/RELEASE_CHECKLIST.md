@@ -32,6 +32,7 @@ The repo is currently **private**. This is everything between here and flipping 
 
 - `TheStratSuite_Project.md` (business strategy, pricing, personal trading details) — stays in the local working folder.
 - Older pine versions don't carry MPL headers — they're archive; the current build does. Add headers on future versions as they're cut.
+- When a release cuts a new versioned pine file, bump the "Written against" / current-build lines to the new filename: every `docs/engineering/*.md`, `docs/README.md` (index header and Source material grep pointer), and `CONTRIBUTING.md`. Done for v3.0.0.
 
 ## Post-launch docs backlog
 

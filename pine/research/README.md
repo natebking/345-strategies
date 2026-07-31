@@ -17,7 +17,8 @@ Companion track: `diagnostics/volume-profile-phase0/` holds the locked evidence 
 | `VP_RSD_Native_Like_Bar_Profile_Diagnostic_v0.3.1.pine` | Active — OHLCV native-like reconstruction |
 | `VP_RSD_Multi_Resolution_Consensus_Diagnostic_v0.4.0.pine` | Active — row-size perturbation consensus |
 | `VP_RSD_Paired_Node_Consensus_Diagnostic_v0.5.0.pine` | **Superseded by v0.5.1** — kept for history |
-| `VP_RSD_Local_Node_Edge_Consensus_Diagnostic_v0.5.1.pine` | Active — current head of the chain |
+| `VP_RSD_Local_Node_Edge_Consensus_Diagnostic_v0.5.1.pine` | Active — manual immutable-range calibration harness |
+| `VP_RSD_Automatic_Local_Node_Edge_Consensus_Diagnostic_v0.6.0.pine` | Active — current automatic RSD-range head |
 | `VP_Research_Preview_v0.2.0_Profile_Parity_Shell.pine` | Active — evidence-gate instrument |
 | `VP_Source_Bundle_Exporter_v0.1.0.pine` | Active — evidence-gate instrument |
 | `VP_Sparse_Visual_Fixture_v0.0.1.pine` | Active — visual-design fixture |
@@ -74,9 +75,19 @@ Kept for history; use v0.5.1. Adds the paired-node test to the v0.4 construction
 
 ### `VP_RSD_Local_Node_Edge_Consensus_Diagnostic_v0.5.1.pine`
 
-The current head of the chain. Replaces v0.5.0's component trace with a *local* paired-node test: starting at the anchor, each grid scans outward on the dense side and accepts the nearest material local maximum in opposite-direction clean strength that encloses a local volume bulge. The local-maximum test prevents tiny ripples inside one transition from becoming edges; a width cap prevents a local edge from swallowing a broad composite distribution. Anchor clustering keeps its configurable radius, mate endpoints use the stricter fixed radius of one base row, and neighbor grids are evaluated pair-aware instead of inheriting the preselected standalone neighbor.
+The manual calibration head. Replaces v0.5.0's component trace with a *local* paired-node test: starting at the anchor, each grid scans outward on the dense side and accepts the nearest material local maximum in opposite-direction clean strength that encloses a local volume bulge. The local-maximum test prevents tiny ripples inside one transition from becoming edges; a width cap prevents a local edge from swallowing a broad composite distribution. Anchor clustering keeps its configurable radius, mate endpoints use the stricter fixed radius of one base row, and neighbor grids are evaluated pair-aware instead of inheriting the preselected standalone neighbor.
 
-Chain position: the strictest test so far — do *both* edges of a volume node survive row-size perturbation?
+Chain position: the frozen-range regression instrument. Its manual timestamps remain useful for reproducing an exact historical comparison, but it is not the intended browsing workflow.
+
+### `VP_RSD_Automatic_Local_Node_Edge_Consensus_Diagnostic_v0.6.0.pine`
+
+The current head of the exploratory chain. It joins the confirmed, swing-only RSD v1.7 Macro broadening-wall selector to the unchanged v0.5.1 local paired-node detector. The newest eligible Macro wall automatically supplies the range: same-side Far/Prior pivot to included Outer pivot. Both Macro timestamps must refine to exact 15-minute bars that printed the pivot prices; otherwise the indicator abstains. The fixed 15-minute chart bars are then reconstructed retrospectively into independent fine/base/coarse profiles, so no manual range timestamps are required.
+
+The profile cache rebuilds only for a new confirmed structural range. The steep-wall test latches a confirmed ATR snapshot to each Macro pivot tuple, so an accepted interval cannot switch merely because current ATR drifts. While a new range is awaiting the next confirmed 15-minute close, the old profile is blanked instead of being shown against new endpoints. Source history, range length, allocation work, profile-bin capacity, volume reconciliation, and endpoint coverage all fail closed. The preferred base row may widen only when needed to keep the fine profile under the fixed 400-row capacity.
+
+Scope limitation: the embedded adapter matches RSD v1.7 with HTF confluence OFF; Pine cannot read another applied study's private settings or state. The default 240-minute Macro timeframe, Multi-N OFF, N values, two-sided gate, and steep-wall filter must remain aligned with the production RSD used for comparison.
+
+Chain position: the first no-date-entry browsing instrument — does automatic structural range selection plus stable two-edge node detection behave sensibly across charts before any behavioral or profitability claims are tested?
 
 ---
 

@@ -2,7 +2,7 @@
 
 TheStrat Suite is a single Pine Script v6 file with no compiler, no test runner, and one runtime: a TradingView chart. That shapes everything about how contributions work here. Correctness rules were learned the hard way — most of them are written down as `FIX` tags in the source and as rules in the engineering docs — and the job of this document is to keep a well-meaning PR from re-learning them.
 
-Current build: `pine/TheStratSuite_v2.2.7-split.pine`. Code references throughout this repo are **function names and `FIX` tags** — grep the source for them. Never line numbers.
+Current build: `pine/TheStratSuite_v3.0.0.pine`. Code references throughout this repo are **function names and `FIX` tags** — grep the source for them. Never line numbers.
 
 ---
 
@@ -43,7 +43,7 @@ A PR that can't answer its checklist isn't ready for review yet.
 
 **What you saw live must be what you see after a reload.** No exceptions, no "minor" cases, no "it only differs for a few bars." A signal, level, or alert that reads differently after a refresh is a release blocker regardless of how useful the feature is.
 
-The full contract — the seven rules, the failure modes, and the case studies behind them (`FIX P0-1`, `FIX P0-2`, `FIX P1-a`, `FIX GLUE-1`) — lives in `docs/engineering/repaint-prevention.md`. This document does not restate it; go read it. Two consequences worth repeating because they decide most PRs:
+The full contract — the eight rules, the failure modes, and the case studies behind them (`FIX P0-1`, `FIX P0-2`, `FIX P1-a`, `FIX GLUE-1`) — lives in `docs/engineering/repaint-prevention.md`. This document does not restate it; go read it. Two consequences worth repeating because they decide most PRs:
 
 - **When freshness and reload-stability conflict, choose reload-stability** (the `FIX P0-2` case study in that doc records this tradeoff being taken deliberately).
 - Forming-bar movement is not repaint — a live trigger updating tick by tick *is* the product. The sin is letting forming-bar data leak into anything the indicator remembers.
@@ -74,10 +74,10 @@ Bug-fix PRs without a tag and inline comment will be asked to add one before mer
 
 ## Versioned pine files
 
-`pine/` holds one file per released version. The newest `-split` file is the current build; everything older is an **immutable archive** — never edited, not even to backport a header or fix a typo.
+`pine/` holds one file per released version. The newest versioned file is the current build; everything older is an **immutable archive** — never edited, not even to backport a header or fix a typo.
 
 - Day-to-day PRs modify the current build file. Its unreleased delta is tracked in the CHANGELOG's `[Unreleased]` section.
-- **A release cuts a new file** (`TheStratSuite_v<major.minor.patch>-split.pine`), performed by a maintainer: copy the current build to the new name, bump the version string in the header comment and the `indicator()` title, move `[Unreleased]` into a dated CHANGELOG entry. The old file stays, untouched, as the snapshot of that release.
+- **A release cuts a new file** (`TheStratSuite_v<major.minor.patch>.pine` — the `-split` suffix was retired with v3.0.0; older snapshots keep their historical names and are never renamed), performed by a maintainer: copy the current build to the new name, bump the version string in the header comment and the `indicator()` title, move `[Unreleased]` into a dated CHANGELOG entry. The old file stays, untouched, as the snapshot of that release.
 - **Every new version file carries the MPL header block** — the three-line Mozilla Public License notice at the top of the current build, directly under the `// TheStrat Suite - v...` title line. Older archive snapshots predate the license header and deliberately don't have one; new versions are not optional.
 - Not every working state becomes a snapshot — versions that only ever existed in the TradingView editor are folded into the next release's CHANGELOG entry (see how 2.2.5 is handled there).
 

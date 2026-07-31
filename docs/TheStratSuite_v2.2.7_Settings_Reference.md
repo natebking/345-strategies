@@ -1,10 +1,10 @@
-# TheStrat Suite - Settings & Options Reference
+# Settings Reference
 
-*Version 2.2.7-split | Last updated 2026-07-28*
+*Version 3.0.0 | Last updated 2026-07-31*
 
 This reference documents every setting in the TheStrat Suite indicator, grouped in the order the panels appear in the TradingView settings dialog. Each entry lists the default value and available options, what the setting does, and when to use it. New to TheStrat? Start with the **Overview** and **TheStrat Concepts (Primer)** below.
 
-Written against `pine/TheStratSuite_v2.2.7-split.pine`. Where behavior traces to a specific fix, the `FIX` tag is cited; grep the source for it.
+Written against `pine/TheStratSuite_v3.0.0.pine`. Where behavior traces to a specific fix, the `FIX` tag is cited; grep the source for it.
 
 ---
 
@@ -26,6 +26,7 @@ Written against `pine/TheStratSuite_v2.2.7-split.pine`. Where behavior traces to
 - [Display - Preview Mode](#display---preview-mode)
 - [Display - Data Table](#display---data-table)
 - [Display - Labels](#display---labels)
+- [Display - Bar Coloring](#display---bar-coloring)
 - [Style - Level Colors](#style---level-colors)
 - [Alerts](#alerts)
 - [Advanced - Exhaustion Behavior](#advanced---exhaustion-behavior)
@@ -50,9 +51,9 @@ Everything is alert-ready and plan-ahead friendly. Consolidated and per-timefram
 ### Quick Start
 
 1. Add TheStrat Suite to your chart. It overlays directly on price.
-2. Open the settings and pick a **Timeframe Preset** (TheStrat Classic, Scalp, Day Trade, Futures/Crypto, Swing Trade, or Investing). The preset auto-configures which timeframes are monitored and their line widths, so you do not need to touch the individual Timeframe rows. Choose **Custom** only if you want to set the six timeframes yourself.
+2. Open the settings and pick a **Timeframe Preset** (TheStrat Classic, Scalp, Day Trade, Futures/Crypto, Swing Trade, or Investing). The preset auto-configures which timeframes are monitored and their line widths, so you do not need to touch the individual Timeframe rows. Choose **Custom** only if you want to set the six timeframes yourself. Then set your chart at or below the preset's fastest timeframe - the Suite reads higher timeframes from a lower chart, never the reverse. On TheStrat Classic that means a 30m chart or lower (Scalp: 5m, Day Trade: 15m). Any slot faster than your chart timeframe shows as a dimmed, empty table row.
 3. Choose a **Label Style**. Leave it on **TheStrat** for standard Strat combo notation (for example 2d-1-2u HAM), or switch to **Universal** for plain-language labels (REVERSAL, CONTINUATION, INSIDE, OUTSIDE) if you are new to TheStrat.
-4. Optionally tune which signals show under the Signals panels, then create a TradingView alert (use the consolidated "Signal In-Force (Any)" alert, or a per-timeframe alert) so you are notified when a setup goes live.
+4. Optionally tune which signals show under the Signals panels, then create one TradingView alert on the indicator with the condition "Any alert() function call" - the consolidated alert, and the only path that carries the full message (trigger and target prices, FTFC). Use the named conditions ("Signal In-Force (TF1)", "Domino Setup", and so on) only when you want separate routing; they fire with fixed text.
 
 ## TheStrat Concepts (Primer)
 
@@ -76,7 +77,7 @@ These definitions describe the vocabulary used throughout the rest of this docum
 
 This panel controls how the indicator's six timeframe slots are configured. Choosing a built-in preset is the fastest way to get a sensible multi-timeframe setup; choosing Custom hands full control to the Timeframes panel below.
 
-- **Preset** (default: TheStrat Classic | options: Custom / TheStrat Classic / Scalp / Day Trade / Futures/Crypto / Swing Trade / Investing) - Auto-configures which timeframes are monitored, which ones are enabled, and the line width used to draw each one. When set to anything other than Custom, your manual Timeframe 1-6 rows are ignored and greyed out (a direct visual signal that the manual config is inert), so you only edit those rows after switching to Custom. What each preset sets:
+- **Preset** (default: TheStrat Classic | options: Custom / TheStrat Classic / Scalp / Day Trade / Futures/Crypto / Swing Trade / Investing) - Auto-configures which timeframes are monitored, which ones are enabled, and the line width used to draw each one. When set to anything other than Custom, your manual Timeframe 1-6 rows are ignored and greyed out (a direct visual signal that the manual config is inert), so you only edit those rows after switching to Custom. Whichever preset you pick, set your chart at or below its fastest timeframe - any slot faster than the chart timeframe shows as a dimmed, empty table row. What each preset sets:
   - **Custom** - Disables the preset override entirely and makes the Timeframes (Custom) panel editable. The six rows then use whatever you set them to.
   - **TheStrat Classic** - 30m, 1H (60), Daily, Weekly, Monthly, Monthly. TF1-TF5 are enabled (TF5 Monthly on), TF6 off. Widths increase with timeframe (1 / 1 / 2 / 3 / 4).
   - **Scalp** - 5m, 15m, 30m, 1H (60), 1H (60), 1H (60). TF1-TF4 enabled, TF5 and TF6 off. Widths 1 / 2 / 3 / 4 / 4.
@@ -275,6 +276,30 @@ These settings govern the text labels attached to level lines, including their p
 
 - **Transparency** (default: 20 | range: 0 to 100) - Controls how see-through the label background is, where 0 is solid and 100 is fully invisible. Raise it to let chart content show through behind labels.
 
+## Display - Bar Coloring
+
+New in v3.0.0 (`BARCOLOR-1`). These settings paint the chart candles themselves - either by each bar's Strat classification or by Full Timeframe Continuity. Candle paint is off by default, one mode is active at a time, and each mode's controls below are greyed out unless that mode is selected.
+
+- **Color Chart Candles** (default: Off | options: Off / Strat Candles / FTFC Candles) - Paints the chart's candles.
+  - **Strat Candles** colors each chart bar by its Strat classification against the prior bar - inside 1, directional 2u/2d, outside 3u/3d, and Failing 2s - using the same classification (and Failing 2 Detection Method) as the data table's CC cell, so candle paint and table notation cannot disagree.
+  - **FTFC Candles** colors each bar by Full Timeframe Continuity - all monitored timeframes above their open (up), all below (down), or conflicting. Historical bars are graded by that bar's close against each timeframe's open as it stood at the time, so painted history shows continuity as it actually developed, not as the periods finally closed.
+
+- **1 (Inside) / 2 (Directional) / 3 (Outside) / F2 (Failing)** (default: all four on | options: on / off) - Strat Candles mode only: toggle candle paint per bar family. Colors follow the Style sections, so a custom palette applies to lines, labels, and candles together:
+  - **1s** use the **1 (Inside Bar)** colors - `1u` (closed above its open) takes the bullish yellow, `1d` the bearish orange.
+  - **2s** use the **Signal** colors - `2u` bullish, `2d` bearish.
+  - **3s** use the **3 (Outside Bar)** colors - `3u` bullish, `3d` bearish.
+  - **Failing 2s** use the **Range Reclaim** colors - `F2u` bearish, `F2d` bullish.
+
+  With **F2 (Failing)** unchecked, or Failing 2 Detection disabled, a Failing 2 paints as its plain `2u`/`2d` (an `F2u` *is* a `2u`, shown without failure paint), so it follows the **2 (Directional)** toggle and Signal colors instead.
+
+- **Up / Down / Conflict** (defaults: #4caf50 green / #f23645 red / #808080 gray | three color pickers) - FTFC Candles mode only: the candle colors for full timeframe continuity up, down, and conflict.
+
+- **Color Conflict Bars** (default: on | options: on / off) - FTFC Candles mode only. When off, conflicted bars keep the chart's normal candle colors, so only full up/down agreement is painted.
+
+- **Highlight Failing 2 Flips** (default: on | options: on / off) - FTFC Candles mode only. When continuity flips while a Failing 2 (Range Reclaim) is live on a monitored timeframe, the flip bar is painted with the Range Reclaim color instead of the plain continuity color. A reclaim that flips continuity is the highest-conviction version of the signal - trapped traders from the failed breakout fuel the new direction.
+
+Cross-panel note: what counts as a Failing 2 - for Strat Candles paint and the FTFC flip highlight alike - follows **Advanced - Failing 2 Detection** (the Enable toggle and the Detection Method). With detection disabled there, no candle paints or highlights as an F2 anywhere in the Suite. And because the family colors are read from the Style panels below, changing a Style color also recolors the candles.
+
 ## Style - Level Colors
 
 These inputs set the colors used to draw level lines and labels. There are two panels, one for bullish (high-side) levels and one for bearish (low-side) levels, with matching roles in each. Colors are purely cosmetic; they do not change which signals fire.
@@ -303,7 +328,7 @@ The Suite condenses all multi-timeframe activity into one push so you do not hav
 
 ### Alerts - Detailed
 
-This panel controls which timeframes feed the consolidated "Signal In-Force (Any)" message and which enrichment fields get appended to it.
+This panel controls which timeframes feed the consolidated alert message and which enrichment fields get appended to it.
 
 - **TF1 / TF2 / TF3 / TF4 / TF5 / TF6** (default: all six on | options: on / off) - Per-timeframe include checkboxes for the consolidated alert. Uncheck a TF to drop its signals from the consolidated message body so a busy lower timeframe does not flood your phone. Important interaction: these checkboxes gate the consolidated `alert()` text (and, because they share its detection loop, the "Signal In-Force (Any)" and "New Potential (Any)" alertconditions). The per-TF alertconditions (for example "Signal In-Force (TF1)") and the Bullish/Bearish ones read their own pre-loop state snapshots and are completely independent of these boxes, so a per-TF alert still fires even if that TF is unchecked here (`FIX U2` keeps their state updated regardless).
 - **Include FTFC** (default: off | options: on / off) - When a consolidated alert fires, appends the live full-timeframe-continuity verdict to the end of the message as one of `FTFC Up`, `FTFC Down`, or `Conflict`. Turn it on when you want directional context attached to every push.
@@ -401,6 +426,8 @@ This panel is a troubleshooting aid for inspecting the indicator's signal logic 
 - **Timeframe to Debug** (default: TF1 | options: TF1 / TF2 / TF3 / TF4 / TF5 / TF6) - Selects which timeframe slot the debug panel reports on, where TF1 is the first timeframe in your settings and so on through TF6. Greyed out when Show Debug Panel is off (`FIX MOD-3`).
 
 ## Troubleshooting & FAQ
+
+- **I added the Suite and see almost nothing.** Three checks, in order: (1) Preset - Custom leaves all six timeframe rows disabled until you enable them; start from a built-in preset. (2) Chart timeframe - slots faster than your chart show as dimmed, empty rows and draw nothing; move your chart to Timeframe 1 or lower. (3) Signal toggles - 2-2 Continuations, Failing 2s, and both expansion signals are off by default; out of the box only reversals and inside continuations draw.
 
 - **I updated the indicator and my alerts stopped working or send old messages.** TradingView alerts bind to the version of the script that existed when the alert was created; they do not automatically pick up a new release. After updating the Suite, delete your existing alerts and recreate them so they bind to the new version.
 
