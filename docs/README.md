@@ -5,7 +5,7 @@ Docs index for the open-source release. Two audiences, two folders:
 - **`concepts/`** — for traders using the indicator. What the signals mean, how to read the chart, how to configure it.
 - **`engineering/`** — for builders forking or extending the script. How the engine works and the rules that keep it correct.
 
-Engineering docs reference the code by function name and `FIX` tag (grep-able), not line number. Written against `pine/TheStratSuite_v2.2.7-split.pine`.
+Engineering docs reference the code by function name and `FIX` tag (grep-able), not line number. Written against `pine/TheStratSuite_v3.0.0.pine`.
 
 ## Existing docs
 
@@ -16,9 +16,10 @@ Engineering docs reference the code by function name and `FIX` tag (grep-able), 
 | `concepts/ftfc.md` | Trader | Full Timeframe Continuity: the sign channel, the voting slots, display and alert integration |
 | `concepts/targets-and-stops.md` | Trader | Magnitude, exhaustion, and stop levels; Take Action Windows; every setting that touches them |
 | `concepts/reading-labels.md` | Trader | Decoder for everything drawn: label anatomy, colors, the data table row by row, alert message format |
-| `TheStratSuite_v2.2.7_Settings_Reference.md` | Trader | Full settings reference for v2.2.7-split, every input in panel order |
+| `TheStratSuite_v2.2.7_Settings_Reference.md` | Trader | Full settings reference, every input in panel order |
+| Bar coloring (v3) | Trader | Candle painting by Strat classification or FTFC: the two modes, family toggles, conflict and flip options — covered in the Settings Reference under Display - Bar Coloring |
 | `engineering/architecture.md` | Builder | The pipeline: security → preview shift → compute → filter → render; where each invariant lives |
-| `engineering/repaint-prevention.md` | Builder | The no-repaint contract: 7 rules + contributor checklist |
+| `engineering/repaint-prevention.md` | Builder | The no-repaint contract: 8 rules + contributor checklist |
 | `engineering/htf-correctness.md` | Builder | Reading 6 TFs from one chart: validTimeframe gate, straddle/glue handling, +12h rule, daily reconstruction, preview mode |
 | `engineering/drawing-decisions.md` | Builder | Why a level is (or isn't) on the chart: the shouldDrawC1Level funnel and every suppression rule |
 | `engineering/rendering.md` | Builder | x/y anchoring, update-in-place object lifetimes, the label pool, consolidation passes, the object budget |
@@ -37,10 +38,8 @@ Research-track scripts are documented separately in `../pine/research/README.md`
 
 The launch docs backlog is fully written; new docs get a row above when they land.
 
-Feature roadmap: **v3 adds bar coloring settings** (candles painted by Strat classification — the last piece of the pre-Suite standalone scripts not yet folded in). Tracked in the root `CHANGELOG.md` under Unreleased; its trader doc lands here alongside the feature.
-
 ## Source material
 
-- `FIX` comments in `pine/TheStratSuite_v2.2.7-split.pine` — each tag documents a solved bug and its rule
+- `FIX` comments in `pine/TheStratSuite_v3.0.0.pine` — each tag documents a solved bug and its rule
 - `DESIGN_CONSTRAINTS.md` — the invariants list; feeds `engineering/architecture.md`
 - `v2.2.3_holiday_glue_fix.md` — feeds `engineering/htf-correctness.md`

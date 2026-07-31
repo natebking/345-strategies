@@ -57,8 +57,6 @@ Liveness is carried where it's carried for every other bar type:
 - **`*` prefix** — a potential state that hasn't confirmed (a pre-F2 open level shows `*F2d`).
 - **Words** — Universal mode says `FAILING` while live; past tense is failed. Humans get tense from language, not casing.
 
-priceactionapi uses the same uppercase convention; its `provisional` field carries liveness on the wire.
-
 ## Hammers & Shooters (`HAM` / `SHO`)
 
 Not bar types — **proportion patterns** layered on top of any structure, defined by where the body sits in the candle's range. A hammer rejected the low (conviction for upside); a shooter rejected the high. The Suite offers three definitions (Filters → Hammer/Shooter Detection):
@@ -79,7 +77,7 @@ An optional color filter requires hammers to be green and shooters red. In Strat
 
 ## The canonical model (builders & API consumers)
 
-Every classification above is a rendering of one four-field tuple — this is the model to use in any programmatic context, and it's how the Suite and priceactionapi stay mutually translatable:
+Every classification above is a rendering of one four-field tuple — this is the model to use in any programmatic context, and it's how the Suite and priceactionapi (an external API serving the same bar classifications — traders can skip its column) stay mutually translatable:
 
 | Field | Values | Suite rendering | priceactionapi |
 |---|---|---|---|
