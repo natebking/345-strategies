@@ -1,6 +1,6 @@
 # TradingView Listing Kit — TheStrat Suite (open-source publication)
 
-Everything to paste into the Publish window. **The description is ONE-SHOT: TradingView does not allow editing it after publication** (typo fixes require moderators). Review before publishing, and make sure the GitHub repo is public first so the link resolves.
+Everything to paste into the Publish window. **The description is ONE-SHOT: on a public script, title/description/tags are editable for only 15 minutes after publishing, then frozen forever** (per the Pine publishing docs; after that, fixes require moderators). Review before publishing, reread within the 15-minute window, and make sure the GitHub repo is public first so the signature link resolves.
 
 ## Settings
 
@@ -14,7 +14,7 @@ Everything to paste into the Publish window. **The description is ONE-SHOT: Trad
 
 ---
 
-TheStrat Suite is a free, open-source multi-timeframe indicator for TheStrat, Rob Smith's price action methodology. It classifies every candle as inside (1), directional (2u/2d), or outside (3), detects the core Strat setups across six configurable timeframes, and draws the levels that matter: entry triggers, magnitude targets, exhaustion levels, and stop loss levels — with Full Timeframe Continuity (FTFC) on every signal.
+TheStrat Suite is an open-source multi-timeframe indicator for TheStrat, Rob Smith's price action methodology. It classifies every candle as inside (1), directional (2u/2d), or outside (3), detects the core Strat setups across six configurable timeframes, and draws the levels that matter: entry triggers, magnitude targets, exhaustion levels, and stop loss levels — with Full Timeframe Continuity (FTFC) on every signal.
 
 WHAT IT DETECTS
 
@@ -52,7 +52,7 @@ Most Strat indicators mark bar numbers. This one consolidates six timeframes int
 
 OPEN SOURCE
 
-The complete source is published under the Mozilla Public License 2.0, together with the engineering documentation (the no-repaint contract, the multi-timeframe correctness rules), a full changelog, and a settings reference. The repository and setup-guide links are in my signature and on my profile. This publication replaces my earlier invite-only listing of the same name; the Suite is now free for everyone.
+The complete source is published under the Mozilla Public License 2.0, together with the engineering documentation (the no-repaint contract, the multi-timeframe correctness rules), a full changelog, and a settings reference. The repository and setup-guide links are in my signature and on my profile. This publication open-sources my earlier invite-only listing of the same name; that listing stays up for its existing users, and updates continue here.
 
 ---
 
@@ -73,7 +73,7 @@ Legacy listing URL: https://www.tradingview.com/script/NNDIyA45-TheStrat-Suite-M
 
 Its description and title are locked. Available levers, in order of reliability:
 
-1. **Final Update** — release notes: "Final update to this listing. TheStrat Suite is now free and open source → [link to new listing]."
+1. **Final Update** — push v3.0.0 as an Update with the link-free release-notes template above (links/references are banned in release notes; TV-internal pointers by name only). Do this IMMEDIATELY after the open listing goes live: on paper, the old closed listing violates "closed-source scripts that reproduce what open-source scripts already do" once the open version exists — no retroactive enforcement is documented, but a hidden script can never be updated, so the signpost must land first. Release notes freeze the moment they post; final wording only.
 2. **Author comment** on the listing saying the same (survives even if nothing else is editable).
 3. **Author's instructions** — edit only if the UI still allows it post-publish: "This invite-only listing is legacy; existing users keep access. Current version: 'TheStrat Suite' (open-source badge) by SpinTrades."
 
