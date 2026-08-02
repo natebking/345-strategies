@@ -8,9 +8,9 @@ How to read this file:
 - **Every fix cites its `FIX` tag.** Grep the current source for the tag to find the exact code and the full inline rationale. Code references are function names and tags, never line numbers.
 - **Dates** come from dated `FIX` comments and file names. Where a snapshot carries no date of its own (2.2.2), the newest dated comment introduced in it is used.
 
-## [Unreleased]
+## [3.0.0] — 2026-08-02
 
-Working build: `pine/TheStratSuite_v3.0.0.pine` — the v3 release candidate (version strings already bumped). On TradingView publish, retitle this section to a dated `[3.0.0]` heading per the contributor checklist.
+Published on TradingView as the open-source listing ("TheStrat Suite [Open Source] — Entries, Targets, and Stop Loss"), superseding the invite-only publication. Source: `pine/TheStratSuite_v3.0.0.pine`.
 
 ### Added
 
