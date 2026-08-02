@@ -46,7 +46,7 @@ Applies to v3.0.0. Settings paths refer to the indicator's settings panel groups
 
 **Take Action Windows.** The zone between trigger and target, shaded while an entry or add still works. Extends to exhaustion if you want. Settings: *Targets - Take Action Windows*. Deep dive: [targets-and-stops](concepts/targets-and-stops.md).
 
-**Stop losses.** A stop on the opposite side of the trigger, CC or C1 referenced, locked for the period once a signal fires, with optional break-even moves at magnitude or exhaustion. Off by default. Settings: *Stops - Stop Levels*. Deep dive: [targets-and-stops](concepts/targets-and-stops.md).
+**Stop losses.** A stop on the opposite side of the trigger, CC or C1 referenced, locked for the period once a signal fires, with optional break-even moves at magnitude or exhaustion, and a Smallest Timeframe Only display mode that draws just the tightest active stop when several timeframes are in force. Off by default. Settings: *Stops - Stop Levels*. Deep dive: [targets-and-stops](concepts/targets-and-stops.md).
 
 ## Display and workflow
 

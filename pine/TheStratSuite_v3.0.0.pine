@@ -269,6 +269,7 @@ tawBorderOpacity = input.int(30, "Border Opacity", minval = 0, maxval = 100, gro
 grpStops = "Stops - Stop Levels"
 showStopLevels = input.bool(false, "Enable", group = grpStops, tooltip = "Show stop loss levels on the opposite side of the trigger. Once a signal goes in force, the stop is locked and persists for the remainder of that period even if the signal is no longer in force.")
 stopReference = input.string("CC", "Reference", options = ["CC", "C1"], group = grpStops, tooltip = "CC: stop tracks the breakout bar's opposite extreme in real time (updates as the candle forms, locks when it closes). Tighter risk, invalidated when the breakout candle itself is reversed. C1: stop at the prior bar's opposite side, locked when signal goes in force. Wider risk, invalidated when the full setup range is taken out. Failing 2 signals always use CC regardless of this setting.")
+stopSmallestOnly = input.bool(false, "Smallest Timeframe Only", group = grpStops, tooltip = "Draw only the stop belonging to the smallest enabled timeframe that currently has one; stops on larger timeframes are hidden. Larger-timeframe stops keep tracking underneath (break even still arms, alert messages still carry their prices) - this only reduces what is drawn. Uses slot order, like the Lead Signal filter.", active = showStopLevels)  // FEATURE STOP-SMALLEST-1
 stopBEatMag = input.bool(false, "Break Even at Magnitude", group = grpStops, tooltip = "Move stop to the entry trigger (break even) when price hits the magnitude level. If no magnitude level exists, uses exhaustion as the trigger instead.")
 stopBEatExh = input.bool(false, "Break Even at Exhaustion", group = grpStops, tooltip = "Move stop to the entry trigger (break even) when price hits the exhaustion level. If no exhaustion level exists, uses magnitude as the trigger instead.")
 stopColorMode = input.string("Opposite Signal", "Color Mode", options = ["Opposite Signal", "Match Signal", "Custom"], group = grpStops, tooltip = "Opposite Signal: bullish stops use the bearish signal color, bearish stops use the bullish signal color. Match Signal: stops match their signal's color. Custom: use the single color below for all stops.")
@@ -2245,6 +2246,30 @@ if barstate.islast and enableDirectionalFilter and anchorIndex > 0 and anchorDir
                     if not na(data.openLine)
                         line.delete(data.openLine)
                         data.openLine := na
+
+// FEATURE STOP-SMALLEST-1 (2026-08-02): Smallest Timeframe Only for stops.
+// Runs AFTER the Lead Signal Filter so a lead-suppressed stop cannot claim the smallest
+// slot, and BEFORE the render phase so larger-TF stop lines are deleted, not just skipped.
+// Display-only: stop prices, sticky latches, break-even, and alert content are untouched.
+// "Smallest" is the lowest eligible slot index - slot order is size order, the same
+// convention the Lead Signal filter anchors on.
+if barstate.islast and showStopLevels and stopSmallestOnly
+    int smallestStopIdx = -1
+    for i = 0 to 5
+        cfg = array.get(tfConfigs, i)
+        if cfg.enabled and smallestStopIdx == -1
+            r = array.get(tfResults, i)
+            if not na(r)
+                if (r.drawStopHigh and not na(r.stopHigh)) or (r.drawStopLow and not na(r.stopLow))
+                    smallestStopIdx := i
+    if smallestStopIdx != -1
+        for i = 0 to 5
+            cfg = array.get(tfConfigs, i)
+            if cfg.enabled and i != smallestStopIdx
+                r = array.get(tfResults, i)
+                if not na(r)
+                    r.drawStopHigh := false
+                    r.drawStopLow := false
 
 // Render phase: draw/update/delete all lines and boxes based on final flag state
 if barstate.islast
