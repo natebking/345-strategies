@@ -8,7 +8,7 @@ Everything to paste into the Publish window. **The description is ONE-SHOT: on a
 - **Title:** `TheStrat Suite [Open Source] — Entries, Targets, and Stop Loss`
   (62 chars — the publish field caps at ~63–64, measured 2026-07-30. Nate's phrasing: the complete trade lifecycle in natural trader English, avoids the "signals" spam cluster. `[Open Source]` sits right after the brand so it survives truncation and disambiguates from the legacy listing, whose title can't change. Multi-timeframe discovery is covered by the category, description line 1, and the multitimeframe tag; FTFC stays in the description.)
 - **Categories:** Candlestick analysis · Multi-timeframe · Pivot Points and Levels (matches the legacy listing's proven category set; S&R is the alternative if a bigger browse audience matters more than continuity)
-- **Tags:** `thestrat`, `strat`, `stoploss`, `multitimeframe`, `priceaction`, `insidebar`, `ftfc`, `candlestickpatterns`, `alertsignals` (all genuinely relevant — irrelevant tags are a moderation risk)
+- **Tags** (tag-page scan 2026-08-02, ranked): `thestrat`, `stoploss`, `multitimeframe`, `mtf`, `priceaction`, `insidebar`, `keylevels`, `alertsignals`, `strat`, `timeframecontinuity` (+ `ftfc` if an 11th slot exists). Dropped from the old draft: `candlestickpatterns` (it aliases the Candlestick Analysis page — already our category), `ftfc` demoted (4-script tag; `timeframecontinuity` is the same niche with 7 scripts including the 923-boost TFO oscillator as a feeder). `insidebar` is the canonical variant (`insidebars` is a 3-script orphan); `keylevels`/`alertsignals` were on the legacy listing and both page strong. All genuinely relevant — irrelevant tags are a moderation risk.
 
 ## Description (paste below, review voice first)
 
