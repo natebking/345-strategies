@@ -282,7 +282,7 @@ previewMode = input.string("Auto", "Preview Mode", options = ["Off", "On", "Auto
 grpTable = "Display - Data Table"
 showBarTypeTable = input.bool(true, "Show Data Table", group = grpTable, tooltip = "Show the multi-timeframe data table")
 tableMode = input.string("Full", "Mode", options = ["Full", "Compact"], group = grpTable, tooltip = "Full: complete table with C2, C1, AS, CC columns. Compact: a single horizontal row of timeframe labels, color-coded. Use Compact Cell Color below to choose what that coloring means.")
-compactCellColor = input.string("Signal", "Compact Cell Color", options = ["Signal", "Timeframe Continuity"], group = grpTable, active = tableMode == "Compact", tooltip = "What the colored timeframe cells mean in Compact mode. Signal: green/red when a signal is in force on that timeframe, yellow/orange when it is an inside bar, plus outside-bar and Failing 2 colors. Timeframe Continuity: green when that timeframe is trading above its open, red when below - the per-timeframe view of what the FTFC row summarizes.")  // FEATURE TABLE-COMPACT-COLOR-1
+compactCellColor = input.string("Bar State", "Compact Cell Color", options = ["Bar State", "Signals In Force"], group = grpTable, active = tableMode == "Compact", tooltip = "What the colored timeframe cells mean in Compact mode - each option mirrors one of the two colorings in the Full table. Bar State: colors every cell by that timeframe's current candle, exactly like the Full table's CC column (yellow/orange inside, green/red directional, plus the outside-bar and Failing 2 colors). Signals In Force: colors a cell only when a signal is actually in force there, exactly like the Full table's TF column - so the row stays dark until something is live.")  // FEATURE TABLE-COMPACT-COLOR-1
 tablePosition = input.string("Top Right", "Position", options = ["Bottom Center", "Bottom Left", "Bottom Right", "Middle Center", "Middle Left", "Middle Right", "Top Center", "Top Left", "Top Right"], group = grpTable, tooltip = "Position of the data table on the chart")
 tableTextSize = input.string("Small", "Text Size", options = ["Tiny", "Small", "Normal", "Large"], group = grpTable, tooltip = "Size of the table text")
 useDashSeparator = input.bool(true, "Use Dash Separator", group = grpTable, tooltip = "Separate candle values with a dash (e.g., 2u-2d instead of 2u2d)")
@@ -2452,7 +2452,7 @@ getBarTypeTextColor(barType) =>
 var table barTypeTable = na
 var int enabledTFCount = 0
 isCompactMode = tableMode == "Compact"
-compactByContinuity = compactCellColor == "Timeframe Continuity"  // FEATURE TABLE-COMPACT-COLOR-1
+compactByBarState = compactCellColor == "Bar State"  // FEATURE TABLE-COMPACT-COLOR-1
 
 if barstate.isfirst
     enabledTFCount := (rEN1 ? 1 : 0) + (rEN2 ? 1 : 0) + (rEN3 ? 1 : 0) + (rEN4 ? 1 : 0) + (rEN5 ? 1 : 0) + (rEN6 ? 1 : 0)
@@ -2641,50 +2641,29 @@ if barstate.islast and showBarTypeTable and not na(barTypeTable)
                 tfLabelStr = getTimeframeLabel(cfg.tf)
                 raw = array.get(tfRawArr, i)
                 result = array.get(tfResults, i)
-                // Determine cell color: signal state, or per-timeframe continuity
+                // Determine cell color: bar state, or signals in force (see Compact Cell Color)
                 color cellBg = #111111
                 color cellText = #555555
                 if not isLowerTF and not na(raw) and not na(result)
+                    // FEATURE TABLE-COMPACT-COLOR-1: the compact row condenses the Full table,
+                    // so its two coloring modes reuse the Full table's own classifier and palette
+                    // rather than inventing a third scheme - the same barType the CC column shows.
+                    [ccTypeCompact, _f2Compact] = detectBarTypeAndFailed(raw.c1H, raw.c1L, raw.ccH, raw.ccL, raw.ccO, raw.ccC)
                     if raw.isPreview and not array.get(reconOKArr, i)  // FIX HTF-STRADDLE-1 (T3): reconstructed slots color normally
                         cellText := color.yellow
-                    else if compactByContinuity
-                        // FEATURE TABLE-COMPACT-COLOR-1: color by this timeframe's own
-                        // direction (close vs open), the same test calculateFTFC applies
-                        // per slot - so the row reads as the breakdown of the FTFC summary.
-                        cellBg := raw.ccC > raw.ccO ? #4caf50 : #f23645
-                        cellText := color.black
-                    else if result.signalInForceHigh
-                        // Bullish signal in force - check type for color
-                        if result.isF2d or result.isF2u
-                            cellBg := COLOR_FAILED_2D
-                        else if str.startswith(result.ccType, "3")
-                            cellBg := COLOR_3_HIGH
-                        else
-                            cellBg := #4caf50
-                        cellText := color.black
-                    else if result.signalInForceLow
-                        // Bearish signal in force - check type for color
-                        if result.isF2u or result.isF2d
-                            cellBg := COLOR_FAILED_2U
-                        else if str.startswith(result.ccType, "3")
-                            cellBg := COLOR_3_LOW
-                        else
-                            cellBg := #f23645
-                        cellText := color.black
+                    else if compactByBarState
+                        // Mirrors the Full table's CC column: every cell carries its bar state.
+                        cellBg := getBarTypeColor(ccTypeCompact)
+                        cellText := ccTypeCompact != "" ? color.black : color.white
                     else
-                        // Not in force - check if 3-bar or inside
-                        ccIs3Exp = show3Expansions and str.startswith(result.ccType, "3")
-                        ccIsInside = raw.ccH <= raw.c1H and raw.ccL >= raw.c1L
-                        ccAboveOpen = raw.ccC > raw.ccO
-                        if ccIs3Exp
-                            cellBg := ccAboveOpen ? COLOR_3_HIGH : COLOR_3_LOW
-                            cellText := color.black
-                        else if ccIsInside
-                            cellBg := ccAboveOpen ? #ffeb3b : #ff9800
-                            cellText := color.black
-                        else
-                            cellBg := #111111
-                            cellText := color.white
+                        // Mirrors the Full table's TF column: colored only while a signal is in
+                        // force, or on an enabled outside bar (in force by definition). Same rule
+                        // as FIX TFCOLOR-1 - an inside bar is not in force and stays dark.
+                        bool inForceCompact = result.signalInForceHigh or result.signalInForceLow
+                        bool ccIs3ExpCompact = show3Expansions and str.startswith(ccTypeCompact, "3")
+                        bool highlightCompact = inForceCompact or ccIs3ExpCompact
+                        cellBg := highlightCompact ? getBarTypeColor(ccTypeCompact) : #111111
+                        cellText := highlightCompact ? color.black : color.white
                 table.cell(barTypeTable, col, 0, tfLabelStr, text_color = cellText, bgcolor = cellBg, text_size = textSize)
                 col += 1
         // Subsequent rows: Domino, FTFC, Filter, Preview

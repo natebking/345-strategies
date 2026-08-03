@@ -22,7 +22,7 @@ How to read this file:
 
 ### Added
 
-- Data table: **Compact Cell Color** — in Compact mode the timeframe cells can now be colored by **Timeframe Continuity** (green when that timeframe is trading above its open, red when below) instead of by signal state. It uses the same open-vs-close comparison `calculateFTFC` applies per slot, so the row reads as the per-timeframe breakdown of the FTFC summary beneath it. Defaults to Signal, the previous behavior. Settings: *Display - Data Table*. (`TABLE-COMPACT-COLOR-1`)
+- Data table: **Compact Cell Color** — in Compact mode you can now choose what the colored timeframe cells mean. **Bar State** (the default) colors every cell by that timeframe's current candle, mirroring the Full table's CC column. **Signals In Force** colors a cell only while a signal is live there, mirroring the Full table's TF column, so the row stays dark until something is actionable. Both reuse the Full table's own classifier (`detectBarTypeAndFailed`) and palette rather than a separate scheme, so Compact and Full can never disagree. Settings: *Display - Data Table*. (`TABLE-COMPACT-COLOR-1`)
 
 ## [3.0.0] — 2026-08-02
 
