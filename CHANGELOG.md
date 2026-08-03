@@ -16,6 +16,7 @@ How to read this file:
 
 ### Changed
 
+- **Universal labels are abbreviated**: `REV`, `CONT`, `INS`, `OUT` replace REVERSAL, CONTINUATION, INSIDE, OUTSIDE (EXP and the FAILING overlay are unchanged). Consolidated labels stack several timeframes on one line, so `W ↑REVERSAL◆ + 1D ↑CONTINUATION◆ + 1H ↑CONTINUATION + 30m ↑CONTINUATION + 15m ↑EXP` ran to 82 characters; it now reads `W ↑REV◆ + 1D ↑CONT◆ + 1H ↑CONT + 30m ↑CONT + 15m ↑EXP`, 35% shorter. Alert messages use the same abbreviations, so chart and alerts still match.
 - Child settings are now visually indented under their parent toggle: "Only When In-Force" under Show Magnitude Levels, under Show Exhaustion Levels, under Show Take Action Windows and under Extend to Exhaustion, plus "Only After Magnitude Hit". Same tree-glyph convention TheStrat Suite Lite uses. Labels only; no behavior change.
 
 - Data table **Mode** options renamed from "Full (TheStrat)" / "Compact (Universal)" to plain **Full** / **Compact**. The mode never depended on the Label Style setting, so the parenthetical was misleading. **Note for existing users:** TradingView stores the selected option as a string, so anyone who had "Compact (Universal)" saved will fall back to Full after updating and needs to reselect Compact once.

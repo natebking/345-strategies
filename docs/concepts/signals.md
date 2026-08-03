@@ -68,7 +68,7 @@ Note the two-layer design: **detection** (Advanced → Failing 2 Detection, on b
 
 ## Universal mode names
 
-With Label Style = Universal, the same signals read in plain language: `↑REVERSAL`, `↑CONTINUATION`, `↑INSIDE`, `↑EXP`, `OUTSIDE`, and `FAILING` for a live F2 — with `◆` marking HAM/SHO conviction and `*` still meaning potential. Same engine, same triggers; only the vocabulary changes.
+With Label Style = Universal, the same signals read in plain language: `↑REV`, `↑CONT`, `↑INS`, `↑EXP`, `OUTSIDE`, and `FAILING` for a live F2 — with `◆` marking HAM/SHO conviction and `*` still meaning potential. Same engine, same triggers; only the vocabulary changes.
 
 ---
 

@@ -52,7 +52,7 @@ Applies to v3.0.0. Settings paths refer to the indicator's settings panel groups
 
 **Data table.** Live multi-timeframe state: C2, C1, actionable-setup and current-candle columns in Strat notation (Full mode), or a compact color-coded row (Compact mode), plus FTFC, Domino, and Lead rows. Settings: *Display - Data Table*. Deep dive: [reading-labels](concepts/reading-labels.md).
 
-**Universal labels.** The same signals in plain language — REVERSAL, CONTINUATION, INSIDE, OUTSIDE, FAILING — for traders who don't speak Strat notation yet. Settings: *Timeframe Preset → Label Style*. Deep dive: [reading-labels](concepts/reading-labels.md).
+**Universal labels.** The same signals in plain language — REV, CONT, INS, OUT, EXP, FAILING — for traders who don't speak Strat notation yet. Settings: *Timeframe Preset → Label Style*. Deep dive: [reading-labels](concepts/reading-labels.md).
 
 **Bar coloring** (new in v3). Chart candles painted by their Strat classification or by FTFC direction, with optional Failing-2 flip highlighting. History is graded honestly — the deep dive covers how. Off by default. Settings: *Display - Bar Coloring*. Deep dive: [settings-reference](TheStratSuite_v2.2.7_Settings_Reference.md#display---bar-coloring).
 

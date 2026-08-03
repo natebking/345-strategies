@@ -52,7 +52,7 @@ Everything is alert-ready and plan-ahead friendly. Consolidated and per-timefram
 
 1. Add TheStrat Suite to your chart. It overlays directly on price.
 2. Open the settings and pick a **Timeframe Preset** (TheStrat Classic, Scalp, Day Trade, Futures/Crypto, Swing Trade, or Investing). The preset auto-configures which timeframes are monitored and their line widths, so you do not need to touch the individual Timeframe rows. Choose **Custom** only if you want to set the six timeframes yourself. Then set your chart at or below the preset's fastest timeframe - the Suite reads higher timeframes from a lower chart, never the reverse. On TheStrat Classic that means a 30m chart or lower (Scalp: 5m, Day Trade: 15m). Any slot faster than your chart timeframe shows as a dimmed, empty table row.
-3. Choose a **Label Style**. Leave it on **TheStrat** for standard Strat combo notation (for example 2d-1-2u HAM), or switch to **Universal** for plain-language labels (REVERSAL, CONTINUATION, INSIDE, OUTSIDE) if you are new to TheStrat.
+3. Choose a **Label Style**. Leave it on **TheStrat** for standard Strat combo notation (for example 2d-1-2u HAM), or switch to **Universal** for plain-language labels (REV, CONT, INS, OUT) if you are new to TheStrat.
 4. Optionally tune which signals show under the Signals panels, then create one TradingView alert on the indicator with the condition "Any alert() function call" - the consolidated alert, and the only path that carries the full message (trigger and target prices, FTFC). Use the named conditions ("Signal In-Force (TF1)", "Domino Setup", and so on) only when you want separate routing; they fire with fixed text.
 
 ## TheStrat Concepts (Primer)
@@ -88,7 +88,7 @@ This panel controls how the indicator's six timeframe slots are configured. Choo
 
   Note: under any preset, the per-timeframe Open lines are forced off and TF6 is always off, regardless of the disabled manual rows behind them.
 
-- **Label Style** (default: TheStrat | options: TheStrat / Universal) - Controls the notation used on chart signal labels. TheStrat shows standard Strat combo notation (for example 2d-1-2u HAM). Universal shows plain-language labels (REVERSAL, CONTINUATION, INSIDE, OUTSIDE) with a direction arrow and a diamond marker for hammer/shooter confidence. Choose Universal if you are new to TheStrat or prefer a simplified read; switch to TheStrat once the combo notation is second nature. This setting only changes label wording, not which signals fire.
+- **Label Style** (default: TheStrat | options: TheStrat / Universal) - Controls the notation used on chart signal labels. TheStrat shows standard Strat combo notation (for example 2d-1-2u HAM). Universal shows plain-language labels (REV (reversal), CONT (continuation), INS (inside), OUT (outside), EXP (expansion), plus FAILING when a breakout is failing) with a direction arrow and a diamond marker for hammer/shooter confidence. Choose Universal if you are new to TheStrat or prefer a simplified read; switch to TheStrat once the combo notation is second nature. This setting only changes label wording, not which signals fire.
 
 ## Timeframes (Custom)
 
@@ -369,7 +369,7 @@ Neither path ever alerts from a previewed or straddled slot: their forming candl
 `<TF> <combo><pattern><H/L><marker> | <enrichment fields>`
 
 - `<TF>` is the timeframe label (for example `1H`).
-- `<combo>` is the Strat combo when Label Style is TheStrat (for example `2d-1-2u`, `3-2u`, or a live Failing 2 in canonical notation like `2u-F2d`), or plain language plus a direction arrow when Label Style is Universal (for example `↑REVERSAL`, `↓CONTINUATION`, `↑EXP`, `↓FAILING`).
+- `<combo>` is the Strat combo when Label Style is TheStrat (for example `2d-1-2u`, `3-2u`, or a live Failing 2 in canonical notation like `2u-F2d`), or plain language plus a direction arrow when Label Style is Universal (for example `↑REV`, `↓CONT`, `↑EXP`, `↓FAILING`).
 - `<pattern>` is ` HAM` or ` SHO` when C1 is a hammer/shooter (a `◆` diamond in Universal mode), omitted otherwise.
 - `<H/L>` appears only when "Show H/L in Labels" is enabled.
 - `<marker>` is a green or red circle indicating bull or bear.

@@ -133,7 +133,7 @@ var chartTfSeconds = timeframe.in_seconds(timeframe.period)
 // -------------------- PRESET --------------------
 grpPreset = "Timeframe Preset"
 tfPreset = input.string("TheStrat Classic", "Preset", options = ["Custom", "TheStrat Classic", "Scalp", "Day Trade", "Futures/Crypto", "Swing Trade", "Investing"], group = grpPreset, tooltip = "Select a timeframe preset to auto-configure timeframes and line widths. When set to anything other than Custom, individual Timeframe 1-6 settings are ignored. You must select Custom to use your own timeframe configuration.")
-labelStyleMode = input.string("TheStrat", "Label Style", options = ["TheStrat", "Universal"], group = grpPreset, tooltip = "TheStrat: standard Strat combo notation (e.g. 2d-1-2u HAM). Universal: plain language labels like REVERSAL, CONTINUATION, INSIDE, and OUTSIDE with diamond for hammer/shooter confidence. Designed for traders who are new to TheStrat or prefer a simplified view.")
+labelStyleMode = input.string("TheStrat", "Label Style", options = ["TheStrat", "Universal"], group = grpPreset, tooltip = "TheStrat: standard Strat combo notation (e.g. 2d-1-2u HAM). Universal: plain-language labels - REV (reversal), CONT (continuation), INS (inside), OUT (outside), EXP (expansion), plus FAILING when a breakout is failing - with an up/down arrow for direction and a diamond for hammer/shooter confidence. Designed for traders who are new to TheStrat or prefer a simplified view.")
 simpleLabelMode = labelStyleMode == "Universal"
 customTFs = tfPreset == "Custom"  // FIX MOD-3: true only when no preset is active; gates the Timeframe rows' `active`
 
@@ -1906,7 +1906,8 @@ collectTimeframeLabels(TimeframeData data, ProcessingResult r) =>
         string c1NumF2 = (r.c1WasF2 ? "F" : "") + r.c1Num
         string c2NumF2 = (r.c2WasF2 ? "F" : "") + r.c2Num
         if simpleLabelMode
-            // Simple mode labels: ↑/↓ direction + CONT, REV, INSIDE, EXP, FAILING, OUTSIDE
+            // Universal labels: ↑/↓ direction + REV, CONT, INS, OUT, EXP, and the FAILING overlay.
+            // Abbreviated 2026-08-03 - consolidated labels stack several timeframes on one line.
             string simpleHigh = ""
             string simpleLow = ""
             bool ccIs2u = str.startswith(r.ccType, "2u")
@@ -1917,26 +1918,26 @@ collectTimeframeLabels(TimeframeData data, ProcessingResult r) =>
                 simpleLow := "↓EXP"
             else if is32Pattern and ccIs2u
                 simpleHigh := "↑EXP"
-                simpleLow := "*OUTSIDE"
+                simpleLow := "*OUT"
             else if is32Pattern and ccIs2d
-                simpleHigh := "*OUTSIDE"
+                simpleHigh := "*OUT"
                 simpleLow := "↓EXP"
             else if is32Pattern
                 simpleHigh := "↑EXP"
                 simpleLow := "↓EXP"
             else if c1IsInside
                 if ccIsInside
-                    simpleHigh := "*↑INSIDE"
-                    simpleLow := "*↓INSIDE"
+                    simpleHigh := "*↑INS"
+                    simpleLow := "*↓INS"
                 else
-                    simpleHigh := "↑INSIDE"
-                    simpleLow := "↓INSIDE"
+                    simpleHigh := "↑INS"
+                    simpleLow := "↓INS"
             else if ccIsInside
-                simpleHigh := data.c1IsHighContinuation ? "*↑CONTINUATION" : "*↑REVERSAL"
-                simpleLow := data.c1IsLowContinuation ? "*↓CONTINUATION" : "*↓REVERSAL"
+                simpleHigh := data.c1IsHighContinuation ? "*↑CONT" : "*↑REV"
+                simpleLow := data.c1IsLowContinuation ? "*↓CONT" : "*↓REV"
             else
-                simpleHigh := data.c1IsHighContinuation ? "↑CONTINUATION" : "↑REVERSAL"
-                simpleLow := data.c1IsLowContinuation ? "↓CONTINUATION" : "↓REVERSAL"
+                simpleHigh := data.c1IsHighContinuation ? "↑CONT" : "↑REV"
+                simpleLow := data.c1IsLowContinuation ? "↓CONT" : "↓REV"
             // Step 2: Apply ◆ confidence indicator to base label (before FAILING overlay)
             if data.c1IsHammer
                 simpleHigh := simpleHigh + "◆"
@@ -1946,11 +1947,11 @@ collectTimeframeLabels(TimeframeData data, ProcessingResult r) =>
             if r.isF2u or r.preF2u
                 // Bullish breakout failing: high label appends FAILING, low is potential outside
                 simpleHigh := simpleHigh + " FAILING"
-                simpleLow := "*OUTSIDE"
+                simpleLow := "*OUT"
             else if r.isF2d or r.preF2d
                 // Bearish breakout failing: low label appends FAILING, high is potential outside
                 simpleLow := simpleLow + " FAILING"
-                simpleHigh := "*OUTSIDE"
+                simpleHigh := "*OUT"
             comboStrHigh := simpleHigh
             comboStrLow := simpleLow
             // Diamond already applied above, clear suffix to avoid doubling
@@ -2866,17 +2867,17 @@ buildAlertLabel(ProcessingResult r, bool isBullish, TimeframeData data, Processi
             else if (r.isF2d and isBullish) or (r.isF2u and not isBullish)
                 combo := dirArrow + "FAILING"
             else if c1IsInside
-                combo := dirArrow + "INSIDE"
+                combo := dirArrow + "INS"
             else if ccIsInsideAlert
                 // CC inside: potential setup (alerts rarely fire here)
                 isCont = (isBullish and data.c1IsHighContinuation) or (not isBullish and data.c1IsLowContinuation)
-                combo := isCont ? dirArrow + "CONTINUATION" : dirArrow + "REVERSAL"
+                combo := isCont ? dirArrow + "CONT" : dirArrow + "REV"
             else if isBullish and data.c1IsHighContinuation
-                combo := dirArrow + "CONTINUATION"
+                combo := dirArrow + "CONT"
             else if not isBullish and data.c1IsLowContinuation
-                combo := dirArrow + "CONTINUATION"
+                combo := dirArrow + "CONT"
             else
-                combo := dirArrow + "REVERSAL"
+                combo := dirArrow + "REV"
         else
             // F2 labels: only show C1 prior. NOTATION-1: canonical F2d/F2u (case no longer marks liveness)
             if r.isF2d and isBullish

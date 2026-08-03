@@ -34,7 +34,7 @@ Six kinds of level, six words:
 
 | Label text | Universal mode | The level | Line style |
 |---|---|---|---|
-| combo (`*2d-1-2u`, `2u-F2u`, …) | words (`↑REVERSAL`, …) | Trigger — C1's high or low | Dashed (solid when the structure itself is the event: confirmed F2 reclaim side, committed outside bar) |
+| combo (`*2d-1-2u`, `2u-F2u`, …) | words (`↑REV`, …) | Trigger — C1's high or low | Dashed (solid when the structure itself is the event: confirmed F2 reclaim side, committed outside bar) |
 | `MAG` | `TARGET` | Magnitude — first target, C2's high/low | Solid |
 | `EXH` | `FINAL` | Exhaustion — extended target | Solid |
 | `OPEN` | `OPEN` | The current period's open | Dotted, gray |
@@ -68,7 +68,7 @@ Every string on the chart is a projection of one four-field tuple per candle —
 
 ## Universal mode
 
-With **Label Style = Universal**, combos become words: `↑REVERSAL`, `↓CONTINUATION`, `↑INSIDE`, `↑EXP`, `*OUTSIDE`, with `FAILING` appended to the side a live F2 is failing and `◆` replacing ` HAM`/` SHO`. The `*` prefix still means potential. `MAG`/`EXH` become `TARGET`/`FINAL`. Same engine, same triggers, same colors — only the vocabulary changes.
+With **Label Style = Universal**, combos become words: `↑REV`, `↓CONT`, `↑INS`, `↑EXP`, `*OUTSIDE`, with `FAILING` appended to the side a live F2 is failing and `◆` replacing ` HAM`/` SHO`. The `*` prefix still means potential. `MAG`/`EXH` become `TARGET`/`FINAL`. Same engine, same triggers, same colors — only the vocabulary changes.
 
 ---
 
@@ -146,7 +146,7 @@ A fully-enriched single-signal push:
 1H 2d-1-2u HAM 🟢 | @ 542.10 MAG 545.30 EXH 548.20 STOP 538.10 | FTFC Up
 ```
 
-- **`<TF> <combo>`** — same timeframe label and combo notation as the chart labels (Universal mode sends the word forms: `1H ↑REVERSAL◆ 🟢`). Failing 2 alerts use the canonical combo (`2u-F2u`), uppercase per `NOTATION-1`.
+- **`<TF> <combo>`** — same timeframe label and combo notation as the chart labels (Universal mode sends the word forms: `1H ↑REV◆ 🟢`). Failing 2 alerts use the canonical combo (`2u-F2u`), uppercase per `NOTATION-1`.
 - **`<marker>`** — 🟢 bullish, 🔴 bearish. Always present; it's the direction read when the combo is ambiguous at a glance.
 - **Detail fields** — `@` (trigger price), `MAG`, `EXH`, `STOP`, each opt-in under Alerts and each *omitted entirely* when its value doesn't exist for that signal. The ` | ` separator only appears when at least one field is present — no dangling pipes, no blank `MAG` (`FIX P1-j`).
 - **FTFC verdict** — appended once at the end of the whole message when **Include FTFC** is on: `FTFC Up` / `FTFC Down` / `Conflict`.
