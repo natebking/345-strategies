@@ -1,6 +1,6 @@
 # 345 Strategies
 
-Open-source price-action trading tools for TradingView, built and maintained by 345 Strategies. The flagship is **TheStrat Suite**; sibling tools and a portable engine live alongside it.
+Open-source price-action trading tools for TradingView, built and maintained by 345 Strategies. The flagship is **TheStrat Suite**; sibling tools and the shared definitions live alongside it.
 
 **What counts as "TheStrat Suite":** whatever ships inside the one TheStrat Suite indicator script on TradingView. Tools that ship as their own scripts are siblings under this roof with their own names - if one later merges into the indicator, it joins the Suite. Distribution decides, not methodology.
 
