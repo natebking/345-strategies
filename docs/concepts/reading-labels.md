@@ -96,7 +96,7 @@ The read at a glance: **yellow/orange = waiting, green/red = live, gray = done.*
 
 The multi-timeframe scoreboard, updated on the live bar only. Two modes (**Display → Data Table → Mode**).
 
-### Full (TheStrat) mode
+### Full mode
 
 One row per enabled timeframe, five columns (`populateBarTypeRow`):
 
@@ -126,7 +126,7 @@ Below the timeframe rows, in order, each spanning the table width:
 | **Lead** | Lead Signal filter enabled | `Lead: D BULL` — the anchor timeframe and its direction, or `No Lead` |
 | **PREVIEW MODE** | Preview is active | Yellow banner — some slots are showing shifted/estimated periods |
 
-### Compact (Universal) mode
+### Compact mode
 
 The whole table collapses to one colored chip per timeframe in a horizontal row, plus the same footer rows. Chip colors: **yellow** = inside and above open, **orange** = inside and below open, **green/red** = signal in force in that direction (Range Reclaim and outside-bar signals use their own Style colors), dark with white text = nothing live, **yellow text** = previewed slot with no rebuilt data (the `?` equivalent).
 

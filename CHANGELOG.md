@@ -8,6 +8,16 @@ How to read this file:
 - **Every fix cites its `FIX` tag.** Grep the current source for the tag to find the exact code and the full inline rationale. Code references are function names and tags, never line numbers.
 - **Dates** come from dated `FIX` comments and file names. Where a snapshot carries no date of its own (2.2.2), the newest dated comment introduced in it is used.
 
+## [3.0.1] — 2026-08-03
+
+### Added
+
+- Data table: **Compact Cell Color** — in Compact mode the timeframe cells can now be colored by **Timeframe Continuity** (green when that timeframe is trading above its open, red when below) instead of by signal state. It uses the same open-vs-close comparison `calculateFTFC` applies per slot, so the row reads as the per-timeframe breakdown of the FTFC summary beneath it. Defaults to Signal, the previous behavior. Settings: *Display - Data Table*. (`TABLE-COMPACT-COLOR-1`)
+
+### Changed
+
+- Data table **Mode** options renamed from "Full (TheStrat)" / "Compact (Universal)" to plain **Full** / **Compact**. The mode never depended on the Label Style setting, so the parenthetical was misleading. **Note for existing users:** TradingView stores the selected option as a string, so anyone who had "Compact (Universal)" saved will fall back to Full after updating and needs to reselect Compact once.
+
 ## [3.0.0] — 2026-08-02
 
 Published on TradingView as the open-source listing ("TheStrat Suite [Open Source] — Entries, Targets, and Stop Loss"), superseding the invite-only publication. Source: `pine/TheStratSuite_v3.0.0.pine`.

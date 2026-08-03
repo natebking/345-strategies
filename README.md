@@ -14,7 +14,7 @@ Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 
 ### Quick start
 
-1. Add [the indicator](https://www.tradingview.com/script/dnJOzGmk-TheStrat-Suite-Open-Source-Entries-Targets-and-Stop-Loss/) to your chart on TradingView — or copy `pine/TheStratSuite_v3.0.0.pine` into the Pine editor.
+1. Add [the indicator](https://www.tradingview.com/script/dnJOzGmk-TheStrat-Suite-Open-Source-Entries-Targets-and-Stop-Loss/) to your chart on TradingView — or copy `pine/TheStratSuite_v3.0.1.pine` into the Pine editor.
 2. Pick a Timeframe Preset (TheStrat Classic, Scalp, Day Trade, Futures/Crypto, Swing Trade, Investing) — or set Custom and configure the six slots yourself.
 3. Read `docs/concepts/bar-types.md` and `docs/concepts/signals.md` to learn what you're looking at.
 
@@ -22,9 +22,11 @@ Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 
 ### `pine/` — indicator source (newest first)
 
-- **`TheStratSuite_v3.0.0.pine`** — current build, published on TradingView as the open-source
-  listing. BARCOLOR-1 (bar coloring by Strat classification or FTFC) and STOP-SMALLEST-1
-  (Smallest Timeframe Only stop display).
+- **`TheStratSuite_v3.0.1.pine`** — current build. TABLE-COMPACT-COLOR-1 (Compact table cells
+  colored by signal state or per-timeframe continuity).
+- `TheStratSuite_v3.0.0.pine` — the first open-source publication on TradingView. BARCOLOR-1
+  (bar coloring by Strat classification or FTFC) and STOP-SMALLEST-1 (Smallest Timeframe Only
+  stop display).
 - `TheStratSuite_v2.2.7-split.pine` — NOTATION-1: canonical uppercase F2u/F2d
   (lowercase live-'f' retired; liveness = slot position / '*' prefix / words).
 - `TheStratSuite_v2.2.6-split.pine` — RECON-KEY-1 (+12h key normalization for daily
