@@ -32,7 +32,7 @@ Applies to v3.0.0. Settings paths refer to the indicator's settings panel groups
 
 **Full Timeframe Continuity (FTFC).** Are all monitored timeframes trading above (or below) their opens right now? Shown in the table, usable as a per-signal filter, and alertable on shifts. Off as a filter by default — it filters hard, so I made it opt-in. Deep dive: [ftfc](concepts/ftfc.md).
 
-**Lead Signal filter.** The highest timeframe with a signal in force becomes the Lead; lower timeframes only show setups that agree with it. Settings: *Filters - Lead Signal*. Deep dive: [signals](concepts/signals.md).
+**Lead Signal filter.** The highest timeframe with a signal in force becomes the Lead; lower timeframes only *draw* setups that agree with it. Chart-only — the data table keeps reporting every timeframe truthfully, filtered or not. Settings: *Filters - Lead Signal*. Deep dive: [signals](concepts/signals.md).
 
 **Domino detection.** Consecutive inside bars stacked across timeframes — a market coiled on several scales at once. Shown in the table, alertable. Settings: *Filters - Domino Setups*. Deep dive: [signals](concepts/signals.md).
 

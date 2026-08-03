@@ -10,13 +10,19 @@ How to read this file:
 
 ## [3.0.1] — 2026-08-03
 
-### Added
+### Fixed
 
-- Data table: **Compact Cell Color** — in Compact mode the timeframe cells can now be colored by **Timeframe Continuity** (green when that timeframe is trading above its open, red when below) instead of by signal state. It uses the same open-vs-close comparison `calculateFTFC` applies per slot, so the row reads as the per-timeframe breakdown of the FTFC summary beneath it. Defaults to Signal, the previous behavior. Settings: *Display - Data Table*. (`TABLE-COMPACT-COLOR-1`)
+- The **Lead Signal filter no longer changes the data table.** It is a chart filter: when it suppresses a counter-trend setup, the lines, labels, targets, stops and Take Action Windows come off the chart, but the table keeps reporting what that timeframe is actually doing. `FIX P1-g` had cleared the in-force state outright so the table would agree with the hidden lines, which inverted the table's purpose — it is the unfiltered reference you check *because* the chart is filtered. Drawing behavior is unchanged: every line, label, target, stop and TAW consumer is gated on the draw flags, never on `signalInForce`. (`LEAD-TABLE-1`, supersedes `P1-g`)
 
 ### Changed
 
+- Child settings are now visually indented under their parent toggle: "Only When In-Force" under Show Magnitude Levels, under Show Exhaustion Levels, under Show Take Action Windows and under Extend to Exhaustion, plus "Only After Magnitude Hit". Same tree-glyph convention TheStrat Suite Lite uses. Labels only; no behavior change.
+
 - Data table **Mode** options renamed from "Full (TheStrat)" / "Compact (Universal)" to plain **Full** / **Compact**. The mode never depended on the Label Style setting, so the parenthetical was misleading. **Note for existing users:** TradingView stores the selected option as a string, so anyone who had "Compact (Universal)" saved will fall back to Full after updating and needs to reselect Compact once.
+
+### Added
+
+- Data table: **Compact Cell Color** — in Compact mode the timeframe cells can now be colored by **Timeframe Continuity** (green when that timeframe is trading above its open, red when below) instead of by signal state. It uses the same open-vs-close comparison `calculateFTFC` applies per slot, so the row reads as the per-timeframe breakdown of the FTFC summary beneath it. Defaults to Signal, the previous behavior. Settings: *Display - Data Table*. (`TABLE-COMPACT-COLOR-1`)
 
 ## [3.0.0] — 2026-08-02
 

@@ -249,10 +249,10 @@ enableDirectionalFilter = input.bool(false, "Only Show Signals Following the Lea
 // -------------------- MAGNITUDE & EXHAUSTION --------------------
 grpMagExh = "Targets - Magnitude & Exhaustion"
 showMagnitude = input.bool(true, "Show Magnitude Levels", group = grpMagExh, tooltip = "Show magnitude (C2 high/low) as take-profit targets for actionable signals")
-magOnlyWhenInForce = input.bool(false, "Only When In-Force", group = grpMagExh, tooltip = "Only show magnitude levels when the signal has triggered (breakout occurred). Hides targets on potential setups so you only see them when the trade is live.")
+magOnlyWhenInForce = input.bool(false, "  └ Only When In-Force", group = grpMagExh, tooltip = "Only show magnitude levels when the signal has triggered (breakout occurred). Hides targets on potential setups so you only see them when the trade is live.")
 showExhaustion = input.bool(true, "Show Exhaustion Levels", group = grpMagExh, tooltip = "Show exhaustion levels (prior swing high/low beyond C2) as extended targets")
-exhOnlyWhenInForce = input.bool(false, "Only When In-Force", group = grpMagExh, tooltip = "Only show exhaustion levels when the signal has triggered (breakout occurred). Hides extended targets on potential setups so you only see them when the trade is live.")
-exhRequiresMagHit = input.bool(false, "Only After Magnitude Hit", group = grpMagExh, tooltip = "When enabled, exhaustion levels only appear after price has reached the magnitude level")
+exhOnlyWhenInForce = input.bool(false, "  └ Only When In-Force", group = grpMagExh, tooltip = "Only show exhaustion levels when the signal has triggered (breakout occurred). Hides extended targets on potential setups so you only see them when the trade is live.")
+exhRequiresMagHit = input.bool(false, "  └ Only After Magnitude Hit", group = grpMagExh, tooltip = "When enabled, exhaustion levels only appear after price has reached the magnitude level")
 
 // Gate for exhaustion search: only scan for pivot-based exhaustion when targets are enabled
 showAnyTargets = showMagnitude or showExhaustion
@@ -260,9 +260,9 @@ showAnyTargets = showMagnitude or showExhaustion
 // -------------------- TAKE ACTION WINDOWS --------------------
 grpTAW = "Targets - Take Action Windows"
 showTakeActionWindows = input.bool(true, "Show Take Action Windows", group = grpTAW, tooltip = "Highlight the zone between trigger and target levels for actionable signals")
-tawOnlyWhenInForce = input.bool(true, "Only When In-Force", group = grpTAW, tooltip = "Only show take action windows when the signal has triggered (breakout occurred)")
+tawOnlyWhenInForce = input.bool(true, "  └ Only When In-Force", group = grpTAW, tooltip = "Only show take action windows when the signal has triggered (breakout occurred)")
 tawExtendToExhaustion = input.bool(true, "Extend to Exhaustion", group = grpTAW, tooltip = "Extend the take action window to the exhaustion level instead of magnitude")
-tawExhOnlyWhenInForce = input.bool(true, "Only When In-Force", group = grpTAW, tooltip = "Only extend to exhaustion when the signal has triggered")
+tawExhOnlyWhenInForce = input.bool(true, "  └ Only When In-Force", group = grpTAW, tooltip = "Only extend to exhaustion when the signal has triggered")
 tawFillOpacity = input.int(8, "Fill Opacity", minval = 0, maxval = 100, group = grpTAW, tooltip = "Opacity of the take action window fill (0 = transparent, 100 = solid)")
 tawBorderOpacity = input.int(30, "Border Opacity", minval = 0, maxval = 100, group = grpTAW, tooltip = "Opacity of the take action window border")
 // -------------------- STOP LEVELS --------------------
@@ -2210,11 +2210,14 @@ if barstate.islast and enableDirectionalFilter and anchorIndex > 0 and anchorDir
                     // Counter-trend confirmed F2: suppress ALL flags
                     r.suppressAllFlags()
                     r.drawOpen := false
-                    // FIX P1-g: also clear in-force so the data table / Lead row do not keep
-                    // highlighting a suppressed counter-trend TF as in-force (lines/labels/alerts
-                    // were already suppressed via the draw flags; signalInForce was not).
-                    r.signalInForceHigh := false
-                    r.signalInForceLow := false
+                    // FIX LEAD-TABLE-1 (2026-08-03, supersedes P1-g): the Lead Signal filter is a
+                    // CHART filter. It no longer clears signalInForce, so the data table keeps
+                    // reporting what the market is actually doing on every timeframe. P1-g cleared
+                    // these to make the table agree with the hidden lines, which inverted the
+                    // table's job: it is the true multi-timeframe reference you check BECAUSE the
+                    // chart is filtered. Drawing is unaffected - every line, label, target, stop
+                    // and TAW consumer is gated on the draw flags cleared just above, never on
+                    // signalInForce.
                 else if isTrendF2
                     // Trend-aligned confirmed F2: suppress counter-side extras only
                     if suppressHigh
@@ -2228,11 +2231,9 @@ if barstate.islast and enableDirectionalFilter and anchorIndex > 0 and anchorDir
                 else
                     // Regular signal or pre-F2: suppress counter-trend side
                     if suppressHigh
-                        r.suppressHighFlags()
-                        r.signalInForceHigh := false  // FIX P1-g: keep table/Lead consistent with hidden lines
+                        r.suppressHighFlags()   // FIX LEAD-TABLE-1: draw flags only; table still reports the truth
                     else
-                        r.suppressLowFlags()
-                        r.signalInForceLow := false   // FIX P1-g
+                        r.suppressLowFlags()    // FIX LEAD-TABLE-1
                     // Pre-F2: suppress open line (not a confirmed reversal yet)
                     if r.preF2d or r.preF2u
                         r.preF2u := false

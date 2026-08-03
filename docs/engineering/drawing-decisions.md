@@ -137,9 +137,9 @@ Separately toggled (`show3ExpMagnitude`, `show3ExpExhaustion`) and one-sided: di
 
 With `enableDirectionalFilter` on, the highest enabled timeframe with a signal in force becomes the anchor (`getSignalDirection`; when both sides are in force, `FIX LEAD-F2-TIEBREAK-2` resolves F2s explicitly first — F2u is bearish, F2d bullish — because the generic "ends in u" test reads `F2u` as bullish and would invert the whole filter). Slots *below* the anchor then have their flags mutated before render:
 
-- **Counter-trend confirmed F2** → `suppressAllFlags()`: everything goes, including the open line, *and* `signalInForceHigh/Low` are cleared (`FIX P1-g`) so the data table and Lead row cannot keep highlighting a timeframe whose lines were hidden.
+- **Counter-trend confirmed F2** → `suppressAllFlags()`: everything goes, including the open line. In-force state is deliberately left alone (`FIX LEAD-TABLE-1`, superseding `P1-g`) so the data table still reports what that timeframe is doing; only drawing is affected. Keep highlighting a timeframe whose lines were hidden.
 - **Trend-aligned confirmed F2** → the signal stays; only the counter-side extras (mag/exh/stop flags on the suppressed side) drop.
-- **Regular signal or pre-F2** → the counter-trend side's flags and in-force are suppressed (`FIX P1-g` again); pre-F2 flags are cleared (not yet a confirmed reversal); and if the surviving side isn't drawing, the open line is cleaned up as an orphan.
+- **Regular signal or pre-F2** → the counter-trend side's draw flags are suppressed (in-force is untouched — `FIX LEAD-TABLE-1`); pre-F2 flags are cleared (not yet a confirmed reversal); and if the surviving side isn't drawing, the open line is cleaned up as an orphan.
 
 Two invariants make this stage safe:
 
@@ -185,7 +185,7 @@ Before merging anything that adds, gates, or suppresses a drawn object:
 
 1. Is the decision centralized — one predicate, consumed by **both** the line path and the label path? Any way for them to diverge fails review (`../DESIGN_CONSTRAINTS.md`).
 2. Is it conditional creation, not create-then-hide? If you suppress an existing object outside `computeSignalState`, do you delete it **and null the owning field** so render recreates it cleanly later (`FIX P1-h`)?
-3. If you hide a signal's lines, do you also clear its in-force flags so the data table and Lead anchor agree with the chart (`FIX P1-g`)?
+3. If you hide a signal's lines, do you leave its in-force flags alone? The data table reports market truth, not what the chart chose to draw (`FIX LEAD-TABLE-1`, which superseded `P1-g`). Gate drawing on the draw flags instead.
 4. Does your FTFC gate belong to the family your branch resolves to, not a neighboring one (`FIX BTC-1`)? Does your in-force logic classify edge structures (flat C2) identically to the draw tree (`FIX CSS-1`)?
 5. Does any new gate require the *opposite* side's level to exist? The opposite trigger is suppressed exactly when a signal goes in force — that requirement made the Take Action Window vanish for the default config (`FIX TAW-1`).
 6. Can your feature produce an orphan — a magnitude, exhaustion, or open line whose parent trigger isn't drawn? Re-require the parent in every fallback path.

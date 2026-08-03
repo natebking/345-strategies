@@ -188,7 +188,7 @@ The conscious decisions in `../DESIGN_CONSTRAINTS.md`, mapped to the code that e
 Before merging anything that adds a feature, a level, or a filter:
 
 1. Does new per-slot data flow follow the one-way chain — security tuple → `TFRawData` → `TimeframeData`/`ProcessingResult` → render? Anything writing upstream, or drawing outside the islast render phase, is wrong.
-2. Does a new filter mutate `ProcessingResult` flags (including `signalInForceHigh/Low`) rather than deleting drawings directly, so lines, labels, table, and alerts stay consistent (`FIX P1-g`)?
+2. Does a new *display* filter mutate `ProcessingResult` **draw flags** rather than deleting drawings directly — and leave `signalInForceHigh/Low` alone, so the data table keeps reporting market truth (`FIX LEAD-TABLE-1`), so lines, labels, table, and alerts stay consistent (`FIX P1-g`)?
 3. Does a new level follow the render pattern — flag-driven `updateOrCreateLine`/`deleteLine`, registered in `collectLinesFromTF` with a new kind and handled in `nullSuppressedLine` (`FIX P1-h`) — and should it be exempt from suppression like stops?
 4. Does new period-scoped or latched state live in `TimeframeData`, reset on the `realPeriodTime` key, and rebuild from history on reload (`FIX P0-1`, `FIX P1-a`, `repaint-prevention.md` checklist)?
 5. Does anything added to the security tuple keep the call count at one per slot, and is every new consumer of `[0]` data a monotone latch, not a snapshot (`FIX P0-2`)?
