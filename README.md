@@ -72,7 +72,7 @@ Start at `docs/README.md` (the index). Trader-facing docs live in `docs/concepts
 - `engineering/repaint-prevention.md` - the no-repaint contract: 8 rules + contributor checklist.
 - `engineering/htf-correctness.md` - multi-timeframe correctness: straddle/glue handling, +12h
   normalization, daily reconstruction, preview mode.
-- `TheStratSuite_v2.2.7_Settings_Reference.md` - full settings reference, every input in panel order.
+- `Settings_Reference.md` - full settings reference, every input in panel order.
 - `DESIGN_CONSTRAINTS.md` - intentional design decisions reviewers should not flag as bugs.
 - `v2.2.3_holiday_glue_fix.md` - postmortem of the CME holiday-glue incident.
 - `tools/` - one page per sibling tool: `invalidation-stop.md`, `powerbar.md`.

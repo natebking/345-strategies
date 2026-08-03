@@ -81,7 +81,7 @@ The incident: CME glues holiday half-sessions into the next trade date (the Frid
 
 ## [2.2.2-split] - 2026-07-02
 
-The audit release. The 2.2.0 baseline went through an external correctness review (the pre-registered review brief is `docs/DESIGN_CONSTRAINTS.md`); the accepted findings landed here as the `P0`/`P1`/`P2`, `BTC`, `CSS`, `TAW`, `MOD`, and `U2` fix families, alongside new HTF-straddle handling. **2.2.1-split** was an editor-only intermediate on this path - no snapshot preserved; the settings reference (now `docs/TheStratSuite_v2.2.7_Settings_Reference.md`) was first written against it.
+The audit release. The 2.2.0 baseline went through an external correctness review (the pre-registered review brief is `docs/DESIGN_CONSTRAINTS.md`); the accepted findings landed here as the `P0`/`P1`/`P2`, `BTC`, `CSS`, `TAW`, `MOD`, and `U2` fix families, alongside new HTF-straddle handling. **2.2.1-split** was an editor-only intermediate on this path - no snapshot preserved; the settings reference (now `docs/Settings_Reference.md`) was first written against it.
 
 ### Added
 

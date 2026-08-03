@@ -16,7 +16,7 @@ Engineering docs reference the code by function name and `FIX` tag (grep-able), 
 | `concepts/ftfc.md` | Trader | Full Timeframe Continuity: the sign channel, the voting slots, display and alert integration |
 | `concepts/targets-and-stops.md` | Trader | Magnitude, exhaustion, and stop levels; Take Action Windows; every setting that touches them |
 | `concepts/reading-labels.md` | Trader | Decoder for everything drawn: label anatomy, colors, the data table row by row, alert message format |
-| `TheStratSuite_v2.2.7_Settings_Reference.md` | Trader | Full settings reference, every input in panel order |
+| `Settings_Reference.md` | Trader | Full settings reference, every input in panel order |
 | Bar coloring (v3) | Trader | Candle painting by Strat classification or FTFC: the two modes, family toggles, conflict and flip options - covered in the Settings Reference under Display - Bar Coloring |
 | `engineering/architecture.md` | Builder | The pipeline: security -> preview shift -> compute -> filter -> render; where each invariant lives |
 | `engineering/repaint-prevention.md` | Builder | The no-repaint contract: 8 rules + contributor checklist |

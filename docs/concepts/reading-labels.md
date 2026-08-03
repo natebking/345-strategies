@@ -161,4 +161,4 @@ Two things worth knowing about delivery:
 
 ---
 
-*Every knob referenced here (label placement, table mode, alert enrichment, colors) is documented in `../TheStratSuite_v2.2.7_Settings_Reference.md`. Notation rules and the canonical tuple: `bar-types.md`. What makes a signal fire in the first place: `signals.md`.*
+*Every knob referenced here (label placement, table mode, alert enrichment, colors) is documented in `../Settings_Reference.md`. Notation rules and the canonical tuple: `bar-types.md`. What makes a signal fire in the first place: `signals.md`.*
