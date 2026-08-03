@@ -2616,13 +2616,18 @@ if barstate.islast
 var string leadRowText = "No Lead"
 var color leadRowTextColor = color.gray
 var color leadRowBgColor = color.new(color.gray, 85)
+// FIX LEADROW-1 (2026-08-03): the Lead row only renders when a Lead actually exists.
+// "No Lead" is the resting state most of the session and told you nothing - the filter
+// being on is already visible in the settings, so an empty row was pure noise.
+var bool hasLead = false
 if barstate.islast and enableDirectionalFilter
     string leadTfLabel = ""
     if anchorIndex >= 0 and anchorIndex <= 5
         leadCfg = array.get(tfConfigs, anchorIndex)
         leadTfLabel := getTimeframeLabel(leadCfg.tf)
     string leadDirText = anchorDirection == 1 ? "BULL" : anchorDirection == -1 ? "BEAR" : ""
-    leadRowText := leadTfLabel != "" and leadDirText != "" ? "Lead: " + leadTfLabel + " " + leadDirText : "No Lead"
+    hasLead := leadTfLabel != "" and leadDirText != ""
+    leadRowText := hasLead ? "Lead: " + leadTfLabel + " " + leadDirText : "No Lead"
     leadRowTextColor := anchorDirection == 1 ? color.green : anchorDirection == -1 ? color.red : color.gray
     leadRowBgColor := anchorDirection == 1 ? color.new(color.green, 85) : anchorDirection == -1 ? color.new(color.red, 85) : color.new(color.gray, 85)
 
@@ -2676,8 +2681,8 @@ if barstate.islast and showBarTypeTable and not na(barTypeTable)
         table.merge_cells(barTypeTable, 0, compactRow, enabledTFCount - 1, compactRow)
         table.cell(barTypeTable, 0, compactRow, tableFtfcText, text_color = tableFtfcTextColor, bgcolor = tableFtfcBgColor, text_size = textSize)
         compactRow += 1
-        // Row 3: Filter (if enabled)
-        if enableDirectionalFilter
+        // Row 3: Lead (only when one exists - FIX LEADROW-1)
+        if enableDirectionalFilter and hasLead
             table.merge_cells(barTypeTable, 0, compactRow, enabledTFCount - 1, compactRow)
             table.cell(barTypeTable, 0, compactRow, leadRowText, text_color = leadRowTextColor, bgcolor = leadRowBgColor, text_size = textSize)
             compactRow += 1
@@ -2711,7 +2716,7 @@ if barstate.islast and showBarTypeTable and not na(barTypeTable)
         table.merge_cells(barTypeTable, 0, row, 4, row)
         table.cell(barTypeTable, 0, row, tableFtfcText, text_color = tableFtfcTextColor, bgcolor = tableFtfcBgColor, text_size = textSize)
         row += 1
-        if enableDirectionalFilter
+        if enableDirectionalFilter and hasLead   // FIX LEADROW-1
             table.merge_cells(barTypeTable, 0, row, 4, row)
             table.cell(barTypeTable, 0, row, leadRowText, text_color = leadRowTextColor, bgcolor = leadRowBgColor, text_size = textSize)
             row += 1
