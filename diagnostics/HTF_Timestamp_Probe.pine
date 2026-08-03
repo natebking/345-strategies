@@ -1,5 +1,5 @@
 //@version=6
-// HTF Timestamp Probe  -  throwaway diagnostic for HTF-STRADDLE-1
+// HTF Timestamp Probe - throwaway diagnostic for HTF-STRADDLE-1
 //
 // Purpose: reveal how TradingView timestamps a higher-timeframe (calendar) bar's OPEN,
 // exactly as the main indicator fetches it (request.security + lookahead_on), so the

@@ -1160,7 +1160,7 @@ if barstate.islast
         cfgS = array.get(tfConfigs, iS)
         rawS = array.get(tfRawArr, iS)
         if cfgS.enabled and not na(rawS) and rawS.isPreview and canRecon and not na(reconDT) and array.size(reconDT) > 0 and isStraddleTF(cfgS.tf) and shouldStraddle(cfgS.tf)
-            // FIX RECON-KEY-1 (2026-07-07, Codex review): normalize "now" by +12h too, matching the
+            // FIX RECON-KEY-1 (2026-07-07): normalize "now" by +12h too, matching the
             // daily-bar keys below. It was raw - valid only under the old +12h/raw double-reading
             // straddle test that GLUE-2b removed. Raw "now" keyed one period behind the +12h daily keys
             // for the ~7h between a period's session close and calendar midnight, so recon matched the
@@ -1478,8 +1478,8 @@ computeSignalState(data, tf, raw, showOpen, populateDebug, debugTfStr) =>
             else if data.stopLowTriggered and (is_f2u or useCC)
                 data.stopLowPrice := tfH_curr
             // Break even: move stop to entry trigger when magnitude/exhaustion is hit
-            // Bullish stop (stopHigh) protects long → BE = prevHigh (entry level, moves stop up)
-            // Bearish stop (stopLow) protects short → BE = prevLow (entry level, moves stop down)
+            // Bullish stop (stopHigh) protects long -> BE = prevHigh (entry level, moves stop up)
+            // Bearish stop (stopLow) protects short -> BE = prevLow (entry level, moves stop down)
             if data.stopHighTriggered
                 bool magHitHigh = data.magHighCrossed and not na(data.prevMagHigh)
                 bool exhHitHigh = data.exhHighCrossed and not na(data.exhHighPrice)
@@ -1507,12 +1507,12 @@ computeSignalState(data, tf, raw, showOpen, populateDebug, debugTfStr) =>
             // global showMagnitude (via force_mag). Was asymmetric: OB exhaustion drew with Show Exhaustion off.
             threeExp_show_exh_high = cc_is_3 and show3Expansions and showExhaustion and show3ExpExhaustion and (not threeExpRequireFTFC or ftfc_up) and cc_above_open_for_mag
             threeExp_show_exh_low = cc_is_3 and show3Expansions and showExhaustion and show3ExpExhaustion and (not threeExpRequireFTFC or ftfc_down) and not cc_above_open_for_mag
-            // Gate inside→3 mag behind show3Expansions to prevent orphan magnitude when 3-exp display is off
+            // Gate inside->3 mag behind show3Expansions to prevent orphan magnitude when 3-exp display is off
             inside_3u_setup = isInside and cc_is_3 and cc_above_open_for_mag and show3Expansions and (not threeExpRequireFTFC or ftfc_up)
             inside_3d_setup = isInside and cc_is_3 and not cc_above_open_for_mag and show3Expansions and (not threeExpRequireFTFC or ftfc_down)
             // Directional F2 mag/exh suppression
-            // F2u (failed bullish breakout → bearish): suppress bullish mag/exh (upside failed)
-            // F2d (failed bearish breakout → bullish): suppress bearish mag/exh (downside failed)
+            // F2u (failed bullish breakout -> bearish): suppress bullish mag/exh (upside failed)
+            // F2d (failed bearish breakout -> bullish): suppress bearish mag/exh (downside failed)
             p3_suppress_mag_high = is_f2u
             p3_suppress_mag_low = is_f2d
             cont_suppress_mag_high = is_22_cont_high or is_32_cont_high

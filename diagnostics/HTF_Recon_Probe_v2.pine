@@ -1,5 +1,5 @@
 //@version=6
-// HTF Reconstruction Probe v2  -  throwaway diagnostic for HTF-STRADDLE-1 T3
+// HTF Reconstruction Probe v2 - throwaway diagnostic for HTF-STRADDLE-1 T3
 //
 // Answers three questions before any Suite integration:
 //  Q1  Does request.security_lower_tf return the CURRENT (developing) chart bar's completed

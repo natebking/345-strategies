@@ -1,0 +1,268 @@
+//@version=6
+// PowerBar - v1.0.0
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+//
+// Based on TheStrat trading methodology by Rob Smith.
+//
+// Marks "PowerBars": setups where the prior candle's proportions are unusual
+// relative to a session-aware, time-of-day-adjusted expected range. It is a
+// context marker, not an entry signal, and it makes no claim about what price
+// does next.
+//
+// Two PowerBar types:
+//   PB-2 (non-inside): C1 has a strong body and is reversed by the current bar.
+//   PB-1 (inside breakout): C1 is an inside bar with mild compression and
+//        the range-setter (C2) isn't oversized relative to recent history.
+//
+// Normalization is hybrid:
+//   range_ratio = bar_range / (session_rolling_avg * tod_factor)
+//   This accounts for both session type (RTH vs overnight on futures)
+//   and structural time-of-day range variation (e.g. opening bars are larger).
+//
+// The separate "core" PowerBar morphology definition - the body/wick shape test
+// shared with the Invalidation Stop tool and the Python engine - is documented
+// in docs/tools/powerbar.md.
+//
+// Nothing here is financial advice. Defaults are starting points, not
+// recommendations; validate on your own instrument and timeframe.
+
+indicator("PowerBar", shorttitle = "PB", overlay = true, max_bars_back = 500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+grpPB = "PowerBar Settings"
+pb2BodyThreshHigh = input.float(0.70, "PB-2: Strong body threshold", minval = 0.1, maxval = 1.0, step = 0.05, group = grpPB, tooltip = "C1 body_pct >= this always passes PB-2 (if reversed). Default 0.70.")
+pb2BodyThreshLow  = input.float(0.50, "PB-2: Medium body threshold", minval = 0.1, maxval = 1.0, step = 0.05, group = grpPB, tooltip = "C1 body_pct >= this passes PB-2 if range_ratio <= size threshold. Default 0.50.")
+pb2SizeThresh     = input.float(1.50, "PB-2: Max range_ratio for medium body", minval = 0.5, maxval = 3.0, step = 0.1, group = grpPB, tooltip = "C1 range_ratio must be <= this when body is between medium and strong thresholds. Default 1.50.")
+
+pb1CompThreshHigh = input.float(0.75, "PB-1: High compression threshold", minval = 0.3, maxval = 1.0, step = 0.05, group = grpPB, tooltip = "compression_ratio >= this always passes PB-1. Default 0.75.")
+pb1CompThreshLow  = input.float(0.55, "PB-1: Moderate compression threshold", minval = 0.2, maxval = 1.0, step = 0.05, group = grpPB, tooltip = "compression_ratio >= this passes PB-1 if C2 range_ratio <= size threshold. Default 0.55.")
+pb1SizeThresh     = input.float(1.50, "PB-1: Max C2 range_ratio for moderate compression", minval = 0.5, maxval = 3.0, step = 0.1, group = grpPB, tooltip = "C2 range_ratio must be <= this when compression is between moderate and high. Default 1.50.")
+
+grpNorm = "Normalization"
+rollingLen        = input.int(20, "Rolling average length", minval = 5, maxval = 50, group = grpNorm, tooltip = "Number of same-session bars for the rolling range average. Default 20.")
+todAlpha          = input.float(0.03, "ToD profile smoothing (alpha)", minval = 0.005, maxval = 0.2, step = 0.005, group = grpNorm, tooltip = "EMA smoothing factor for time-of-day profile. Lower = more stable, higher = more responsive. 0.03 ~ 66-bar half-life per slot.")
+isFutures         = input.bool(false, "Futures instrument (session-aware norm)", group = grpNorm, tooltip = "Enable session-aware normalization. Separates RTH and overnight rolling averages. Enable for ES, NQ, etc.")
+rthStartHour      = input.int(9, "RTH start hour (exchange TZ)", minval = 0, maxval = 23, group = grpNorm)
+rthStartMin       = input.int(30, "RTH start minute", minval = 0, maxval = 59, group = grpNorm)
+rthEndHour        = input.int(16, "RTH end hour (exchange TZ)", minval = 0, maxval = 23, group = grpNorm)
+
+grpDisplay = "Display"
+pbColor   = input.color(color.white, "PowerBar highlight color", group = grpDisplay)
+showPB2   = input.bool(true, "Show PB-2 (non-inside reversed)", group = grpDisplay)
+showPB1   = input.bool(true, "Show PB-1 (inside breakout)", group = grpDisplay)
+showLabel = input.bool(false, "Show PB label on bar", group = grpDisplay)
+
+// ============================================================================
+// TIME-OF-DAY & SESSION DETECTION
+// ============================================================================
+
+barHour = hour(time, syminfo.timezone)
+barMin  = minute(time, syminfo.timezone)
+
+isRTH() =>
+    if not isFutures
+        true
+    else
+        bool afterStart = barHour > rthStartHour or (barHour == rthStartHour and barMin >= rthStartMin)
+        bool beforeEnd = barHour < rthEndHour
+        afterStart and beforeEnd
+
+bool currentRTH = isRTH()
+
+// Time slot index for ToD profile: 0-287 (5-minute resolution across 24 hours)
+// This covers any TF >= 5m. Each unique bar start time maps to one slot.
+int slotIdx = barHour * 12 + math.floor(barMin / 5)
+
+// ============================================================================
+// SESSION-AWARE ROLLING AVERAGE
+// ============================================================================
+
+float barRange = high - low
+
+// Maintain separate rolling windows for RTH and overnight
+var float[] rthRanges = array.new_float(0)
+var float[] ovnRanges = array.new_float(0)
+
+if currentRTH
+    array.push(rthRanges, barRange)
+    if array.size(rthRanges) > rollingLen
+        array.shift(rthRanges)
+else
+    array.push(ovnRanges, barRange)
+    if array.size(ovnRanges) > rollingLen
+        array.shift(ovnRanges)
+
+float sessionAvg = na
+if isFutures
+    if currentRTH and array.size(rthRanges) >= 10
+        sessionAvg := array.avg(rthRanges)
+    else if not currentRTH and array.size(ovnRanges) >= 10
+        sessionAvg := array.avg(ovnRanges)
+else
+    // Equities: all bars are same session, use simple SMA
+    if array.size(rthRanges) >= 10
+        sessionAvg := array.avg(rthRanges)
+
+// ============================================================================
+// TIME-OF-DAY PROFILE (EMA per slot)
+// ============================================================================
+
+// Fixed arrays of 288 slots (24h * 12 five-min slots per hour).
+// Each slot stores an EMA of the range seen at that time of day.
+// todEma[slotIdx] tracks the smoothed average range for that slot.
+// sessionEma tracks the smoothed overall session average range.
+// todFactor = todEma[slot] / sessionEma
+
+var float[] todEma = array.new_float(288, 0.0)
+var bool[]  todInit = array.new_bool(288, false)
+var float   sessionEmaRTH = 0.0
+var float   sessionEmaOVN = 0.0
+var bool    sessionInitRTH = false
+var bool    sessionInitOVN = false
+
+// Update the EMA for this time slot
+float prevSlotEma = array.get(todEma, slotIdx)
+bool  slotWasInit = array.get(todInit, slotIdx)
+float newSlotEma = slotWasInit ? prevSlotEma * (1.0 - todAlpha) + barRange * todAlpha : barRange
+array.set(todEma, slotIdx, newSlotEma)
+array.set(todInit, slotIdx, true)
+
+// Update session-level EMA
+if currentRTH
+    sessionEmaRTH := sessionInitRTH ? sessionEmaRTH * (1.0 - todAlpha) + barRange * todAlpha : barRange
+    sessionInitRTH := true
+else
+    sessionEmaOVN := sessionInitOVN ? sessionEmaOVN * (1.0 - todAlpha) + barRange * todAlpha : barRange
+    sessionInitOVN := true
+
+// Compute ToD factor
+float sessionEmaForSlot = currentRTH ? sessionEmaRTH : sessionEmaOVN
+float todFactor = sessionEmaForSlot > 0 ? newSlotEma / sessionEmaForSlot : 1.0
+todFactor := math.max(0.3, math.min(3.0, todFactor))
+
+// Final adjusted expected range
+float expectedRange = not na(sessionAvg) ? sessionAvg * todFactor : na
+
+// ============================================================================
+// BAR TYPE CLASSIFICATION
+// ============================================================================
+
+float c1H = high[1]
+float c1L = low[1]
+float c1O = open[1]
+float c1C = close[1]
+float c2H = high[2]
+float c2L = low[2]
+float c2O = open[2]
+float c2C = close[2]
+
+bool ccHighX = high > c1H
+bool ccLowX  = low < c1L
+bool ccAboveOpen = close > open
+
+string ccType = ""
+if ccHighX and ccLowX
+    ccType := ccAboveOpen ? "3u" : "3d"
+else if ccHighX
+    ccType := "2u"
+else if ccLowX
+    ccType := "2d"
+else
+    ccType := "1"
+
+// C1 type (relative to C2)
+bool c1HighX = c1H > c2H
+bool c1LowX  = c1L < c2L
+
+string c1Type = ""
+if c1HighX and c1LowX
+    c1Type := (c1C > c1O) ? "3u" : "3d"
+else if c1HighX
+    c1Type := "2u"
+else if c1LowX
+    c1Type := "2d"
+else
+    c1Type := "1"
+
+bool c1IsInside = c1Type == "1"
+
+// Directions
+bool ccBullish = ccType == "2u" or ccType == "3u"
+bool ccBearish = ccType == "2d" or ccType == "3d"
+bool ccDirectional = ccBullish or ccBearish
+
+bool c1Bullish = c1C > c1O
+
+// C1 reversed by CC?
+bool c1Reversed = (c1Bullish and ccBearish) or (not c1Bullish and ccBullish)
+
+// ============================================================================
+// POWERBAR-2: NON-INSIDE C1 EVALUATION
+// ============================================================================
+
+float c1Range = c1H - c1L
+float c1Body = math.abs(c1C - c1O)
+float c1BodyPct = c1Range > 0 ? c1Body / c1Range : 0.0
+
+// C1's range_ratio: use the expected range from 1 bar ago
+float c1Expected = expectedRange[1]
+float c1RangeRatio = not na(c1Expected) and c1Expected > 0 ? c1Range / c1Expected : na
+
+bool pb2Pass = false
+if ccDirectional and not c1IsInside and c1Reversed
+    if c1BodyPct >= pb2BodyThreshHigh
+        pb2Pass := true
+    else if c1BodyPct >= pb2BodyThreshLow and not na(c1RangeRatio) and c1RangeRatio <= pb2SizeThresh
+        pb2Pass := true
+
+// ============================================================================
+// POWERBAR-1: INSIDE BREAKOUT EVALUATION
+// ============================================================================
+
+float c2Range = c2H - c2L
+float compressionRatio = c2Range > 0 ? c1Range / c2Range : na
+
+// C2's range_ratio: use the expected range from 2 bars ago
+float c2Expected = expectedRange[2]
+float c2RangeRatio = not na(c2Expected) and c2Expected > 0 ? c2Range / c2Expected : na
+
+bool pb1Pass = false
+if ccDirectional and c1IsInside
+    if not na(compressionRatio) and compressionRatio >= pb1CompThreshHigh
+        pb1Pass := true
+    else if not na(compressionRatio) and compressionRatio >= pb1CompThreshLow and not na(c2RangeRatio) and c2RangeRatio <= pb1SizeThresh
+        pb1Pass := true
+
+// ============================================================================
+// COMBINED POWERBAR
+// ============================================================================
+
+bool isPowerBar = (showPB2 and pb2Pass) or (showPB1 and pb1Pass)
+
+// ============================================================================
+// DISPLAY
+// ============================================================================
+
+barcolor(isPowerBar ? pbColor : na)
+
+if showLabel and isPowerBar
+    string lbl = pb1Pass ? "PB1" : "PB2"
+    label.new(bar_index, ccBullish ? low : high, lbl,
+         style = ccBullish ? label.style_label_up : label.style_label_down,
+         color = color.new(pbColor, 70),
+         textcolor = pbColor,
+         size = size.tiny)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(isPowerBar, title = "PowerBar", message = "PowerBar detected: {{ticker}} {{interval}} at {{time}}")
+alertcondition(pb2Pass, title = "PowerBar-2", message = "PB-2 (reversed strong body): {{ticker}} {{interval}} at {{time}}")
+alertcondition(pb1Pass, title = "PowerBar-1", message = "PB-1 (inside breakout): {{ticker}} {{interval}} at {{time}}")

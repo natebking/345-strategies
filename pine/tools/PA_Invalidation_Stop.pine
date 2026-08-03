@@ -1,0 +1,977 @@
+//@version=6
+// Price Action Invalidation Stop Loss - v1.0.0
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+//
+// Based on TheStrat trading methodology by Rob Smith.
+//
+// A structural stop-loss overlay. Rather than a fixed distance or a raw ATR
+// multiple, the stop sits at the price level that would INVALIDATE the reason
+// the trade was taken: the prior completed 30m/60m high or low. It ratchets in
+// one direction only, and tightens when higher-timeframe structure confirms
+// (a 2 in the trade's direction, a Failing 2 against it, an outside bar).
+//
+// Six selectable versions, one dropdown:
+//   Classic                  structural step-stop (prior 30m/60m level + 2u/F2 tightens)
+//   Mike's Version           class/rung-gated exits plus a Catastrophe Stop
+//   Strat-PSAR               parabolic trail breathing between the looser HTF level and price
+//   Aggression               continuous price-action aggression index breathes the trail
+//   Compare: Classic + Mike's  both drawn together
+//   Classic + Cascade Break  Classic plus a timed 30m/60m cascade-break exit
+//
+// No-repaint: every higher-timeframe read uses a completed bar
+// (request.security with [1] and lookahead_on); forming-bar highs, lows and
+// opens are accumulated from chart bars rather than requested.
+
+indicator("Price Action Invalidation Stop Loss", "PA Invalidation Stop", overlay=true)
+
+// === Inputs ===
+// --- Behavior ---
+G_BEHAVIOR = "Behavior"
+version          = input.string("Classic", "Version", options=["Classic", "Mike's Version", "Strat-PSAR", "Aggression", "Compare: Classic + Mike's", "Classic + Cascade Break"], group=G_BEHAVIOR, tooltip="Pick ONE version - this is the only control you need to switch between them:\n- Classic = the original structural step-stop (prior 30m/60m low + 2u/F2 tightens).\n- Mike's Version = class/rung-gated exits + Catastrophe Stop.\n- Strat-PSAR = parabolic trail that breathes between the looser HTF low and price.\n- Aggression = continuous price-action aggression index breathes the trail.\n- Compare = Classic + Mike's drawn together (blue/orange + green/red).\n- Classic + Cascade Break = Classic structural stop PLUS an exit when the 30m AND 60m both sit against the trade (below/above their OPENs) for N consecutive minutes. Whichever fires first. Experimental - validate it on your own instrument and timeframe before relying on it.\n\n(Candle-shape adjust below is an optional add-on for Classic/PSAR, off by default.)")
+tighten_on_2     = input.bool(true,  "Tighten on 2-in-direction (at HTF close)", group=G_BEHAVIOR)
+respect_3        = input.bool(false, "3-override: hold stop at 3's H/L during live 3", group=G_BEHAVIOR)
+use_neutral      = input.bool(true,  "Use neutral state when direction not supported", group=G_BEHAVIOR)
+
+// --- Cascade-break exit (used only by the 'Classic + Cascade Break' version) ---
+G_CASC = "Cascade-break exit"
+casc_minutes      = input.int(5, "Cascade break: consecutive minutes 30m+60m against", minval=1, group=G_CASC, tooltip="While the position is open, count consecutive minutes where price sits on the WRONG side of the 30m and 60m OPENs (below for a long, at/above for a short). At this many minutes the cascade has broken - the directional drift that justified the trade is dead. Exit at that bar's close. Counter restarts at each entry. Threshold is in MINUTES, converted to bars for the chart timeframe.")
+casc_require_both = input.bool(true, "Require BOTH 30m and 60m against (off = either)", group=G_CASC, tooltip="On = both 30m and 60m must be against (the tested rule). Off = either frame against triggers (fires earlier/tighter; untested).")
+casc_arm_after_R  = input.float(0.0, "Arm cascade only after trade reaches this R (0 = always)", minval=0.0, step=0.25, group=G_CASC, tooltip="0 = cascade exit always armed (matches the tested rule). Set e.g. 1.0 to ignore cascade breaks until the trade has first reached +1R - skips early head-fakes at the cost of later exits. Entry R = distance from entry close to the structural stop.")
+
+// --- Live Class mode parameters ---
+G_LIVE = "Live Class parameters"
+i_cata_mult = input.float(3.0, "Catastrophe Stop: move multiplier (x avg 5m range)", minval=0.5, step=0.25, group=G_LIVE, tooltip="Catastrophe Stop = i_cata_mult * average 5m range. A single 5m bar that travels more than this far against the position forces an immediate exit, regardless of structure (news-spike / flash-move net). Used by Mike's Version + the PSAR/Aggression engines. Tune on data.")
+i_avg5_len   = input.int(20, "Catastrophe Stop: avg 5m range length", minval=1, group=G_LIVE)
+
+// --- Candle-shape stop adjust (hammers / shooters / powerbars) ---
+G_SHAPE = "Candle-shape stop adjust"
+shape_adjust      = input.bool(false, "Enable shape adjust (hammer/shooter/powerbar)", group=G_SHAPE, tooltip="At each 15m/30m/60m close, score the just-closed candle. A FOR shape (hammer/bull-power for a long) WIDENS the stop to that candle's own low/high - gives the trade room, bounded to a real bar level. An AGAINST shape (shooter/bear-power for a long) TIGHTENS the stop toward price (to the candle's low/high). Largest TF that just closed with a shape wins.")
+shape_hs_thresh   = input.float(0.5, "Hammer/shooter: both O & C beyond this x of range  (0.5 = TheStrat Suite 'Broad/Loose')", minval=0.5, maxval=0.8, step=0.05, group=G_SHAPE)
+shape_pbody_frac  = input.float(0.70, "Powerbar: body >= x range", minval=0.5, maxval=0.95, step=0.05, group=G_SHAPE)
+shape_pmaxwick    = input.float(0.20, "Powerbar: max single wick <= x range", minval=0.05, maxval=0.4, step=0.05, group=G_SHAPE)
+shape_pbve_min    = input.float(1.0, "Powerbar: min body vs expected  (powerbar_core: >= 1.0)", minval=0.0, maxval=5.0, step=0.1, group=G_SHAPE, tooltip="Matches the PowerBar core definition: the body must be at least this x the NORMAL body for that timeframe. Expected body = rolling avg of recent bodies on that TF (length below). NOTE: this uses plain rolling-average normalization. The PowerBar tool in this repository additionally normalizes by session (RTH vs overnight) and time of day; that refinement is not replicated here.")
+shape_pbve_len    = input.int(20, "Powerbar: expected-body rolling length", minval=3, group=G_SHAPE)
+shape_atr_len     = input.int(14, "15m ATR length (Aggression engine)", minval=1, group=G_SHAPE)
+shape_mark        = input.bool(false, "Mark shape events (H/S/P)", group=G_SHAPE)
+
+// --- Trail engine (Classic mode only) ---
+G_ENGINE = "Strat-PSAR / Aggression params"
+psar_af0     = input.float(0.02, "PSAR: start AF", minval=0.001, step=0.001, group=G_ENGINE)
+psar_af_step = input.float(0.02, "PSAR: AF step per new extreme", minval=0.001, step=0.001, group=G_ENGINE)
+psar_af_max  = input.float(0.20, "PSAR: max AF", minval=0.01, step=0.01, group=G_ENGINE)
+psar_af_ease = input.float(0.01, "PSAR: AF ease on FOR shape", minval=0.0, step=0.005, group=G_ENGINE)
+psar_af_bump = input.float(0.04, "PSAR: AF bump on AGAINST shape", minval=0.0, step=0.005, group=G_ENGINE)
+agg_len      = input.int(5, "Aggression: smoothing (15m bars)", minval=1, group=G_ENGINE)
+agg_dist_min = input.float(1.0, "Aggression: min trail dist (x ATR15)", minval=0.1, step=0.25, group=G_ENGINE)
+agg_dist_max = input.float(4.0, "Aggression: max trail dist (x ATR15)", minval=0.5, step=0.25, group=G_ENGINE)
+
+// --- Visual markers (default OFF - clean stop line only) ---
+G_VISUAL = "Visual markers"
+show_transitions = input.bool(false, "State transition markers (X, N, L, S)", group=G_VISUAL)
+show_tightens    = input.bool(false, "Tighten event markers (2u/2d, F2, 3)", group=G_VISUAL)
+show_state_bg    = input.bool(false, "State background tint", group=G_VISUAL)
+show_htf_levels  = input.bool(false, "HTF reference levels (p30l/p30h/p60l/p60h)", group=G_VISUAL)
+show_lc_dash     = input.bool(false, "Mike's Version dashboard", group=G_VISUAL)
+show_mike_tighten = input.bool(true,  "Mike's: show soft tighten line (2nd, dim line)", group=G_VISUAL, tooltip="Mike's Version draws TWO lines: the solid bright line is the enforced invalidation (break + confirm here = exit), and this dim line is the soft tightened ratchet the rung logic pulls to (not an enforced exit). Turn off to show only the enforced line.")
+show_exit_x      = input.bool(true,  "Mark stop-trigger points (X)", group=G_VISUAL, tooltip="Plots an X at the exact level/bar where the stop actually triggered out (exit or flip), colored to match the trailing line. Makes it clear where the trail-out happened versus where the step-line merely re-levels.")
+
+// --- Debug ---
+G_DEBUG = "Debug"
+log_flips        = input.bool(false, "Emit diagnostic Pine Logs", group=G_DEBUG)
+
+// One Version dropdown drives everything: which line(s) show + how Classic trails.
+trail_engine = version == "Strat-PSAR" ? "Strat-PSAR" : version == "Aggression" ? "Aggression" : "Structural"
+show_classic = version == "Classic" or version == "Strat-PSAR" or version == "Aggression" or version == "Compare: Classic + Mike's" or version == "Classic + Cascade Break"
+show_mike    = version == "Mike's Version" or version == "Compare: Classic + Mike's"
+
+// === Prior completed HTF bar H/L (anti-repaint: lookahead_on + [1]) ===
+p30h = request.security(syminfo.tickerid, "30", high[1], lookahead=barmerge.lookahead_on)
+p30l = request.security(syminfo.tickerid, "30", low[1],  lookahead=barmerge.lookahead_on)
+p60h = request.security(syminfo.tickerid, "60", high[1], lookahead=barmerge.lookahead_on)
+p60l = request.security(syminfo.tickerid, "60", low[1],  lookahead=barmerge.lookahead_on)
+
+// === Just-closed HTF close + two-back H/L (for 2u/2d at HTF close, used by tightening) ===
+p30c1 = request.security(syminfo.tickerid, "30", close[1], lookahead=barmerge.lookahead_on)
+p30h2 = request.security(syminfo.tickerid, "30", high[2],  lookahead=barmerge.lookahead_on)
+p30l2 = request.security(syminfo.tickerid, "30", low[2],   lookahead=barmerge.lookahead_on)
+p60c1 = request.security(syminfo.tickerid, "60", close[1], lookahead=barmerge.lookahead_on)
+p60h2 = request.security(syminfo.tickerid, "60", high[2],  lookahead=barmerge.lookahead_on)
+p60l2 = request.security(syminfo.tickerid, "60", low[2],   lookahead=barmerge.lookahead_on)
+
+// Just-closed HTF opens (for candle-shape scoring) + 15m ATR for the ATR magnitude mode
+ltf15_open_prev = request.security(syminfo.tickerid, "15", open[1], lookahead=barmerge.lookahead_on)
+p30o1 = request.security(syminfo.tickerid, "30", open[1], lookahead=barmerge.lookahead_on)
+p60o1 = request.security(syminfo.tickerid, "60", open[1], lookahead=barmerge.lookahead_on)
+shape_atr = request.security(syminfo.tickerid, "15", ta.atr(shape_atr_len), lookahead=barmerge.lookahead_on)
+
+// Expected body per HTF (rolling avg of recent bodies) for the powerbar_core body_vs_expected test.
+exp_body_15 = request.security(syminfo.tickerid, "15", ta.sma(math.abs(close - open), shape_pbve_len)[1], lookahead=barmerge.lookahead_on)
+exp_body_30 = request.security(syminfo.tickerid, "30", ta.sma(math.abs(close - open), shape_pbve_len)[1], lookahead=barmerge.lookahead_on)
+exp_body_60 = request.security(syminfo.tickerid, "60", ta.sma(math.abs(close - open), shape_pbve_len)[1], lookahead=barmerge.lookahead_on)
+
+// Continuous price-action aggression index (Engine C): -1 (bearish) .. +1 (bullish), per 15m bar,
+// blended from close-position-in-range, signed body %, and wick imbalance, then EMA-smoothed.
+f_raw_agg(o, h, l, c) =>
+    rng = h - l
+    rng > 0 ? (((c - l) / rng * 2 - 1) + (c > o ? 1 : c < o ? -1 : 0) * (math.abs(c - o) / rng) + ((math.min(o, c) - l) - (h - math.max(o, c))) / rng) / 3 : 0.0
+agg15 = request.security(syminfo.tickerid, "15", ta.ema(f_raw_agg(open[1], high[1], low[1], close[1]), agg_len), lookahead=barmerge.lookahead_on)
+
+// === 15m LTF reference ===
+ltf15_close_prev = request.security(syminfo.tickerid, "15", close[1], lookahead=barmerge.lookahead_on)
+ltf15_high_prev  = request.security(syminfo.tickerid, "15", high[1],  lookahead=barmerge.lookahead_on)
+ltf15_low_prev   = request.security(syminfo.tickerid, "15", low[1],   lookahead=barmerge.lookahead_on)
+ltf15_high_prior = request.security(syminfo.tickerid, "15", high[2],  lookahead=barmerge.lookahead_on)
+ltf15_low_prior  = request.security(syminfo.tickerid, "15", low[2],   lookahead=barmerge.lookahead_on)
+ltf15_new = ta.change(time("15")) != 0
+
+// === 5m LTF reference (rung 1 confirmation + Catastrophe Stop scale) ===
+ltf5_close_prev = request.security(syminfo.tickerid, "5", close[1], lookahead=barmerge.lookahead_on)
+new5 = ta.change(time("5")) != 0
+avg5_range = request.security(syminfo.tickerid, "5", ta.sma(high - low, i_avg5_len), lookahead=barmerge.lookahead_on)
+cata_X = i_cata_mult * avg5_range
+
+ltf_against_long  = ltf15_new and ltf15_low_prev  < ltf15_low_prior
+ltf_against_short = ltf15_new and ltf15_high_prev > ltf15_high_prior
+
+// === Direction support (long/short active when HTF is in clean 2/3 direction) ===
+htf_30_supports_long  = not na(ltf15_close_prev) and not na(p30h) and ltf15_close_prev > p30h
+htf_60_supports_long  = not na(ltf15_close_prev) and not na(p60h) and ltf15_close_prev > p60h
+htf_30_supports_short = not na(ltf15_close_prev) and not na(p30l) and ltf15_close_prev < p30l
+htf_60_supports_short = not na(ltf15_close_prev) and not na(p60l) and ltf15_close_prev < p60l
+dir_long_active  = htf_30_supports_long  or htf_60_supports_long
+dir_short_active = htf_30_supports_short or htf_60_supports_short
+
+// === Running H/L for in-progress HTF/LTF bars, accumulated from chart bars ===
+new15 = ta.change(time("15")) != 0
+new30 = ta.change(time("30")) != 0
+new60 = ta.change(time("60")) != 0
+
+var float c5h  = na
+var float c5l  = na
+var float c15h = na
+var float c15l = na
+var float c30h = na
+var float c30l = na
+var float c60h = na
+var float c60l = na
+c5h  := new5  ? high : math.max(nz(c5h,  high), high)
+c5l  := new5  ? low  : math.min(nz(c5l,  low),  low)
+c15h := new15 ? high : math.max(nz(c15h, high), high)
+c15l := new15 ? low  : math.min(nz(c15l, low),  low)
+c30h := new30 ? high : math.max(nz(c30h, high), high)
+c30l := new30 ? low  : math.min(nz(c30l, low),  low)
+c60h := new60 ? high : math.max(nz(c60h, high), high)
+c60l := new60 ? low  : math.min(nz(c60l, low),  low)
+
+// === Forming HTF bar OPENs (no-repaint: chart-bar accumulator, not request.security) ===
+var float o30 = na
+var float o60 = na
+o30 := new30 ? open : nz(o30, open)
+o60 := new60 ? open : nz(o60, open)
+
+// === Cascade-break counter: consecutive minutes with 30m+60m against (above/open read) ===
+// against-long  = close below the forming HTF open (above_open false);
+// against-short = close at/above the forming HTF open (above_open true).
+// Threshold is specified in minutes and converted to chart bars.
+casc_bars = math.max(1, math.round(casc_minutes * 60 / timeframe.in_seconds()))
+casc_against_L = casc_require_both ? (close < o30 and close < o60) : (close < o30 or close < o60)
+casc_against_S = casc_require_both ? (close >= o30 and close >= o60) : (close >= o30 or close >= o60)
+var int casc_run_L = 0
+var int casc_run_S = 0
+casc_run_L := casc_against_L ? casc_run_L + 1 : 0
+casc_run_S := casc_against_S ? casc_run_S + 1 : 0
+casc_break_L = casc_run_L >= casc_bars
+casc_break_S = casc_run_S >= casc_bars
+use_casc = version == "Classic + Cascade Break"
+
+curr_30_2u = c30h > p30h
+curr_30_2d = c30l < p30l
+curr_60_2u = c60h > p60h
+curr_60_2d = c60l < p60l
+
+just_30_closed_2u = new30 and p30c1 > p30h2
+just_30_closed_2d = new30 and p30c1 < p30l2
+just_60_closed_2u = new60 and p60c1 > p60h2
+just_60_closed_2d = new60 and p60c1 < p60l2
+
+htf_f2u_active = (curr_30_2u and ltf15_close_prev < p30h) or (curr_60_2u and ltf15_close_prev < p60h)
+htf_f2d_active = (curr_30_2d and ltf15_close_prev > p30l) or (curr_60_2d and ltf15_close_prev > p60l)
+
+// === 3-in-progress detection (intrabar): bar took prior bar's high AND prior bar's low ===
+curr_15_3 = not na(ltf15_high_prev) and not na(ltf15_low_prev) and c15h > ltf15_high_prev and c15l < ltf15_low_prev
+curr_30_3 = curr_30_2u and curr_30_2d
+curr_60_3 = curr_60_2u and curr_60_2d
+
+three_low_long   = curr_15_3 ? c15l : curr_30_3 ? c30l : curr_60_3 ? c60l : na
+three_high_short = curr_15_3 ? c15h : curr_30_3 ? c30h : curr_60_3 ? c60h : na
+any_3_active     = curr_15_3 or curr_30_3 or curr_60_3
+
+long_stop  = math.max(p30l, p60l)   // TIGHTER HTF low  (the immediate invalidation / Structural-mode stop)
+short_stop = math.min(p30h, p60h)
+long_back  = math.min(p30l, p60l)   // LOOSER HTF low   (deep structural backstop for the breathing engines)
+short_back = math.max(p30h, p60h)
+eng_active = trail_engine != "Structural"   // PSAR/Aggression engines breathe; Structural is the step-stop
+
+// =============================================================================
+// === LIVE CLASS COMPUTATION (used by Mike's Version) =========================
+// =============================================================================
+f_cls(n) => n == 1 ? "C1" : n == 2 ? "C2" : n == 3 ? "C3" : "C4"
+
+// The cascade (semantic, direction-agnostic). "against" = bad for the position.
+f_live_class(broke_against, broke_with, price_against, price_inside, first_child_broke_with, phase, first_child_type, first_child_closed_against, opp_two, is_long) =>
+    int cls = 4
+    string nt = "forming 1 (inside)"
+    if broke_against and broke_with
+        if price_against
+            if first_child_broke_with
+                cls := 1
+                nt := is_long ? "forming 3d-A (clean reversal)" : "forming 3u-A (clean reversal)"
+            else
+                cls := 2
+                nt := is_long ? "forming 3d-B/C (confirm)" : "forming 3u-B/C (confirm)"
+        else
+            cls := 3
+            nt := "forming F3 (indecision)"
+    else if broke_against and not broke_with
+        if price_against
+            if phase == 2 and first_child_closed_against
+                cls := 1
+                nt := is_long ? "forming 2d-A (sustained)" : "forming 2u-A (sustained)"
+            else if phase == 2 and first_child_type == opp_two
+                cls := 2
+                nt := is_long ? "forming 2d-C (reversal)" : "forming 2u-C (reversal)"
+            else if phase == 2
+                cls := 2
+                nt := is_long ? "forming 2d-B (late break)" : "forming 2u-B (late break)"
+            else
+                cls := 2
+                nt := is_long ? "forming 2d phase-1 (snapback)" : "forming 2u phase-1 (snapback)"
+        else
+            cls := 4
+            nt := is_long ? "forming F2d (failed breakdown, supportive)" : "forming F2u (failed breakout, supportive)"
+    else if broke_with and not broke_against
+        if price_inside
+            cls := 3
+            nt := is_long ? "forming F2u (your push faded)" : "forming F2d (your push faded)"
+        else
+            cls := 4
+            nt := is_long ? "forming 2u (in force up)" : "forming 2d (in force down)"
+    else
+        cls := 4
+        nt := "forming 1 (inside)"
+    [cls, nt]
+
+// --- Phase of the forming 30m: 1 = first 15m, 2 = second 15m ---
+var int phase30 = 1
+if new30
+    phase30 := 1
+else if new15
+    phase30 := 2
+
+// --- First-15m child context, latched at the 1->2 transition ---
+phase_1to2_30 = new15 and not new30
+var string first15_type             = "na"
+var bool   first15_high_over_p30h   = false
+var bool   first15_low_under_p30l   = false
+var bool   first15_closed_below_p30l = false
+var bool   first15_closed_above_p30h = false
+if new30
+    first15_type := "na"
+    first15_high_over_p30h    := false
+    first15_low_under_p30l    := false
+    first15_closed_below_p30l := false
+    first15_closed_above_p30h := false
+if phase_1to2_30
+    fb_h = ltf15_high_prev > ltf15_high_prior
+    fb_l = ltf15_low_prev  < ltf15_low_prior
+    fc_above = ltf15_close_prev > ltf15_high_prior
+    fc_below = ltf15_close_prev < ltf15_low_prior
+    first15_type := fb_h and fb_l ? (fc_above ? "3u" : fc_below ? "3d" : "F3") : fb_h ? (fc_above ? "2u" : "F2u") : fb_l ? (fc_below ? "2d" : "F2d") : "1"
+    first15_high_over_p30h    := ltf15_high_prev  > p30h
+    first15_low_under_p30l    := ltf15_low_prev   < p30l
+    first15_closed_below_p30l := ltf15_close_prev < p30l
+    first15_closed_above_p30h := ltf15_close_prev > p30h
+
+// --- Phase of the forming 60m: 1 = first 30m, 2 = second 30m ---
+var int phase60 = 1
+if new60
+    phase60 := 1
+else if new30
+    phase60 := 2
+
+// --- First-30m child context, latched at the mid-60m 30m boundary ---
+phase_1to2_60 = new30 and not new60
+var string first30_type             = "na"
+var bool   first30_high_over_p60h   = false
+var bool   first30_low_under_p60l   = false
+var bool   first30_closed_below_p60l = false
+var bool   first30_closed_above_p60h = false
+if new60
+    first30_type := "na"
+    first30_high_over_p60h    := false
+    first30_low_under_p60l    := false
+    first30_closed_below_p60l := false
+    first30_closed_above_p60h := false
+if phase_1to2_60
+    g_h = p30h > p30h2
+    g_l = p30l < p30l2
+    gc_above = p30c1 > p30h2
+    gc_below = p30c1 < p30l2
+    first30_type := g_h and g_l ? (gc_above ? "3u" : gc_below ? "3d" : "F3") : g_h ? (gc_above ? "2u" : "F2u") : g_l ? (gc_below ? "2d" : "F2d") : "1"
+    first30_high_over_p60h    := p30h  > p60h
+    first30_low_under_p60l    := p30l  < p60l
+    first30_closed_below_p60l := p30c1 < p60l
+    first30_closed_above_p60h := p30c1 > p60h
+
+// --- Confirmation rung latches (reset on the parent TF boundary) ---
+var bool rung1_down = false
+var bool rung2_down = false
+var bool rung1_up   = false
+var bool rung2_up   = false
+if new30
+    rung1_down := false
+    rung2_down := false
+    rung1_up   := false
+    rung2_up   := false
+if new5 and ltf5_close_prev < p30l
+    rung1_down := true
+if new5 and ltf5_close_prev > p30h
+    rung1_up := true
+if new15 and ltf15_close_prev < p30l
+    rung2_down := true
+if new15 and ltf15_close_prev > p30h
+    rung2_up := true
+
+var bool r1_60d = false
+var bool r2_60d = false
+var bool r3_60d = false
+var bool r1_60u = false
+var bool r2_60u = false
+var bool r3_60u = false
+if new60
+    r1_60d := false
+    r2_60d := false
+    r3_60d := false
+    r1_60u := false
+    r2_60u := false
+    r3_60u := false
+if new5 and ltf5_close_prev < p60l
+    r1_60d := true
+if new5 and ltf5_close_prev > p60h
+    r1_60u := true
+if new15 and ltf15_close_prev < p60l
+    r2_60d := true
+if new15 and ltf15_close_prev > p60h
+    r2_60u := true
+if new30 and p30c1 < p60l
+    r3_60d := true
+if new30 and p30c1 > p60h
+    r3_60u := true
+
+// --- Latched forming-bar state (30m and 60m) ---
+broke_low_30  = c30l < p30l
+broke_high_30 = c30h > p30h
+broke_low_60  = c60l < p60l
+broke_high_60 = c60h > p60h
+price_below_p30l = close < p30l
+price_above_p30h = close > p30h
+price_inside_30  = close >= p30l and close <= p30h
+price_below_p60l = close < p60l
+price_above_p60h = close > p60h
+price_inside_60  = close >= p60l and close <= p60h
+
+// --- Run the cascade (30m/60m, long/short) ---
+[lc30L, note30L] = f_live_class(broke_low_30,  broke_high_30, price_below_p30l, price_inside_30, first15_high_over_p30h, phase30, first15_type, first15_closed_below_p30l, "2u", true)
+[lc30S, note30S] = f_live_class(broke_high_30, broke_low_30,  price_above_p30h, price_inside_30, first15_low_under_p30l, phase30, first15_type, first15_closed_above_p30h, "2d", false)
+[lc60L, note60L] = f_live_class(broke_low_60,  broke_high_60, price_below_p60l, price_inside_60, first30_high_over_p60h, phase60, first30_type, first30_closed_below_p60l, "2u", true)
+[lc60S, note60S] = f_live_class(broke_high_60, broke_low_60,  price_above_p60h, price_inside_60, first30_low_under_p60l, phase60, first30_type, first30_closed_above_p60h, "2d", false)
+
+// --- Class -> action (design rule: never wait for a 15m close to act) ---
+// C1 = TRUE invalidation: exit immediately (the C1 classification already requires price
+//      beyond the structural level in a confirmed/sustained context, so it IS the rung-0 touch).
+// C2 = PROBABLE but snapback-prone: tighten on classification, EXIT on a confirmed 5m close (rung 1).
+// C3 = momentum warning: tighten only, never exit.  C4 = hold.
+struct_exit_30L = (lc30L == 1) or (lc30L == 2 and rung1_down)
+struct_exit_30S = (lc30S == 1) or (lc30S == 2 and rung1_up)
+struct_exit_60L = (lc60L == 1) or (lc60L == 2 and r1_60d)
+struct_exit_60S = (lc60S == 1) or (lc60S == 2 and r1_60u)
+c2_tighten_30L = lc30L == 2
+c2_tighten_30S = lc30S == 2
+c2_tighten_60L = lc60L == 2
+c2_tighten_60S = lc60S == 2
+c3_tighten_30L = lc30L == 3
+c3_tighten_30S = lc30S == 3
+c3_tighten_60L = lc60L == 3
+c3_tighten_60S = lc60S == 3
+
+// --- Aggregate (tighter / more-urgent wins) ---
+struct_exit_L = struct_exit_30L or struct_exit_60L
+struct_exit_S = struct_exit_30S or struct_exit_60S
+lc_tighten_L  = c2_tighten_30L or c3_tighten_30L or c2_tighten_60L or c3_tighten_60L
+lc_tighten_S  = c2_tighten_30S or c3_tighten_30S or c2_tighten_60S or c3_tighten_60S
+
+// =============================================================================
+// === CANDLE-SHAPE STOP ADJUST (hammers / shooters / powerbars) ================
+// =============================================================================
+// Returns the bullish/bearish sign of a candle: +1 hammer or bull-powerbar,
+// -1 shooter or bear-powerbar, 0 none. Thresholds passed in (functions can't read globals).
+// Matches the TheStrat Suite "Broad (Loose)" hammer/shooter definition and the canonical
+// PowerBar core definition. PowerBar takes precedence over hammer/shooter.
+f_shape_sign(o, h, l, c, hs_thresh, pbody, pmaxwick, exp_body, bve_min) =>
+    rng = h - l
+    int s = 0
+    if rng > 0
+        body     = math.abs(c - o)
+        uw       = h - math.max(o, c)
+        lw       = math.min(o, c) - l
+        body_pct = body / rng
+        max_wp   = math.max(uw, lw) / rng
+        o_from_l = (o - l) / rng
+        c_from_l = (c - l) / rng
+        // Powerbar (powerbar_core): big body, neither wick too long, AND body large vs the normal
+        // body for this TF (body_vs_expected >= bve_min). Direction by close vs open.
+        is_pb  = body_pct >= pbody and max_wp <= pmaxwick and not na(exp_body) and exp_body > 0 and body >= bve_min * exp_body
+        // Broad (Loose) hammer/shooter: BOTH open and close beyond the threshold (0.5 = canonical broad).
+        ham    = o_from_l >= hs_thresh and c_from_l >= hs_thresh
+        sho    = o_from_l <= (1 - hs_thresh) and c_from_l <= (1 - hs_thresh)
+        s := is_pb ? (c >= o ? 1 : -1) : ham ? 1 : sho ? -1 : 0
+    s
+
+// Score each TF's just-closed candle, but only on the bar where that TF closes.
+sh15 = (shape_adjust and new15) ? f_shape_sign(ltf15_open_prev, ltf15_high_prev, ltf15_low_prev, ltf15_close_prev, shape_hs_thresh, shape_pbody_frac, shape_pmaxwick, exp_body_15, shape_pbve_min) : 0
+sh30 = (shape_adjust and new30) ? f_shape_sign(p30o1, p30h, p30l, p30c1, shape_hs_thresh, shape_pbody_frac, shape_pmaxwick, exp_body_30, shape_pbve_min) : 0
+sh60 = (shape_adjust and new60) ? f_shape_sign(p60o1, p60h, p60l, p60c1, shape_hs_thresh, shape_pbody_frac, shape_pmaxwick, exp_body_60, shape_pbve_min) : 0
+
+// Largest TF that just closed WITH a shape wins. Carry its bullish sign + its candle's H/L
+// (strat-native structural levels - the warning candle's actual low/high, not a midpoint).
+shape_sign = sh60 != 0 ? sh60 : sh30 != 0 ? sh30 : sh15 != 0 ? sh15 : 0
+shape_lo   = sh60 != 0 ? p60l : sh30 != 0 ? p30l : sh15 != 0 ? ltf15_low_prev  : na
+shape_hi   = sh60 != 0 ? p60h : sh30 != 0 ? p30h : sh15 != 0 ? ltf15_high_prev : na
+
+// Per-direction effect (only on the close bar that carried a shape).
+//   FOR  (+ while long / - while short) = HOLD: suppress this bar's discretionary tighten.
+//   AGAINST                              = pull the stop toward price by structural/ATR magnitude.
+shp_for_L  = shape_sign > 0
+shp_for_S  = shape_sign < 0
+shp_agst_L  = shape_sign < 0
+shp_agst_S  = shape_sign > 0
+// AGAINST tighten target = the warning candle's own low (long) / high (short) - a real bar level.
+shp_tgt_L   = shape_lo
+shp_tgt_S   = shape_hi
+
+// === State machines: 1=long, 0=neutral, -1=short ===
+// Two INDEPENDENT machines run every bar so Compare mode can show both. Neutral logic is
+// identical in both - the exit mode only changes WHEN we leave a side, not the
+// flip-vs-stand-aside decision that follows (still gated on dir_*_active).
+
+// Catastrophe Stop: a single 5m bar travels > cata_X against the position (rung 0).
+cata_exit_L = not na(cata_X) and (c5h - close) >= cata_X
+cata_exit_S = not na(cata_X) and (close - c5l) >= cata_X
+
+// Re-entry cooldown: after a stop-out, block re-entry until the next 15m bar opens. Prevents
+// wick churn - price chopping at the stop (closing below it but wicking through it) would
+// otherwise re-enter and re-exit every bar, spamming exit X's. One entry attempt per 15m.
+var bool reentry_block_c = false
+var bool reentry_block_m = false
+if new15
+    reentry_block_c := false
+    reentry_block_m := false
+
+// ---------------- Classic machine ----------------
+var int   state_c    = 0
+var float stop_c     = na
+var bool  flip_f2_c  = false
+var float exit_px_c  = na   // level where the stop last triggered out (for the X marker)
+var float disp_c     = na   // stop level DRAWN this bar (incl. the exit bar, so the X lands on it)
+var int   disp_dir_c = 0    // direction the drawn level belongs to (1=long,-1=short,0=none) - for color
+var float psar_c     = na   // PSAR engine: trailing SAR  (reset to na on each exit -> reseed on entry)
+var float ep_c       = na   // PSAR engine: extreme point since entry
+var float af_c       = na   // PSAR engine: acceleration factor
+var float entry_px_c = na   // entry close of current Classic position (for cascade arm-after-R)
+var float entry_R_c  = na   // R distance at entry (for cascade arm-after-R)
+var float max_r_c    = na   // running max favorable R since entry (STICKY arm-after-R)
+var bool  casc_exit_evt_c = false
+casc_exit_evt_c := false    // reset each bar; set true only when a cascade-break causes the exit
+if state_c == 1
+    // --- TRAIL ENGINE: compute stop_c for this bar (direction/exit logic is shared below) ---
+    if trail_engine == "Strat-PSAR"
+        // Seed at the LOOSER HTF low (deep structural anchor); breathe up via AF; floor there too.
+        if na(ep_c)
+            psar_c := long_back
+            ep_c := high
+            af_c := psar_af0
+        else
+            if high > ep_c
+                ep_c := high
+                af_c := math.min(af_c + psar_af_step, psar_af_max)
+            if shape_adjust and shp_for_L
+                af_c := math.max(af_c - psar_af_ease, psar_af0)   // FOR shape -> breathe out
+            if shape_adjust and shp_agst_L
+                af_c := math.min(af_c + psar_af_bump, psar_af_max) // AGAINST shape -> breathe in
+            psar_c := psar_c + af_c * (ep_c - psar_c)
+        stop_c := math.max(nz(psar_c, long_back), long_back)        // floored at deep structure, ratchets up
+    else if trail_engine == "Aggression"
+        agg_dist = shape_atr * (agg_dist_min + (agg_dist_max - agg_dist_min) * (nz(agg15) + 1) / 2)
+        if na(ep_c)
+            stop_c := long_back   // seed at the deep structural backstop (widest), tighten up from here
+            ep_c := close
+        else
+            stop_c := math.max(stop_c, long_back)
+        if not na(agg_dist) and not na(shape_atr)
+            stop_c := math.max(stop_c, math.min(close - agg_dist, low - syminfo.mintick))
+    else
+        // Structural (default): ratchet + HTF tightens + candle-shape adjust.
+        stop_c := na(stop_c) ? long_stop : math.max(stop_c, long_stop)
+        if tighten_on_2 and not shp_for_L
+            if just_30_closed_2u
+                stop_c := math.max(stop_c, p30l)
+            if just_60_closed_2u
+                stop_c := math.max(stop_c, p60l)
+        if htf_f2u_active and not na(ltf15_low_prev) and not shp_for_L
+            stop_c := math.max(stop_c, ltf15_low_prev)
+        if respect_3 and not na(three_low_long)
+            stop_c := three_low_long
+        if shp_agst_L and not na(shp_tgt_L)
+            stop_c := math.max(stop_c, shp_tgt_L)
+        // Shape FOR (hammer/bull-power) WIDENS the stop down toward the FOR candle's own low - gives
+        // room (un-tightens), floored at the structural invalidation so it persists without a 1-bar dip.
+        if shp_for_L and not na(shape_lo)
+            stop_c := math.max(math.min(stop_c, shape_lo), long_stop)
+    disp_c := stop_c
+    disp_dir_c := 1
+    // Exit on a LIVE breach of the drawn level; engines also hard-exit on the Catastrophe Stop (catastrophic
+    // single-5m move) since the breathing trail can sit wider than the immediate invalidation.
+    casc_armed_L = casc_arm_after_R <= 0 or (not na(max_r_c) and max_r_c >= casc_arm_after_R)
+    casc_fire_L = use_casc and casc_break_L and casc_armed_L
+    if not na(stop_c) and (low < stop_c or (eng_active and cata_exit_L) or casc_fire_L)
+        casc_exit_evt_c := casc_fire_L and not (low < stop_c)
+        exit_px_c := low < stop_c ? stop_c : close
+        reentry_block_c := true
+        psar_c := na
+        ep_c := na
+        af_c := na
+        flip_f2_c := htf_f2u_active
+        if use_neutral and not dir_short_active
+            state_c := 0
+            stop_c := na
+        else
+            state_c := -1
+            stop_c := short_stop
+else if state_c == -1
+    if trail_engine == "Strat-PSAR"
+        if na(ep_c)
+            psar_c := short_back
+            ep_c := low
+            af_c := psar_af0
+        else
+            if low < ep_c
+                ep_c := low
+                af_c := math.min(af_c + psar_af_step, psar_af_max)
+            if shape_adjust and shp_for_S
+                af_c := math.max(af_c - psar_af_ease, psar_af0)
+            if shape_adjust and shp_agst_S
+                af_c := math.min(af_c + psar_af_bump, psar_af_max)
+            psar_c := psar_c + af_c * (ep_c - psar_c)
+        stop_c := math.min(nz(psar_c, short_back), short_back)
+    else if trail_engine == "Aggression"
+        agg_dist = shape_atr * (agg_dist_min + (agg_dist_max - agg_dist_min) * ((-nz(agg15)) + 1) / 2)
+        if na(ep_c)
+            stop_c := short_back
+            ep_c := close
+        else
+            stop_c := math.min(stop_c, short_back)
+        if not na(agg_dist) and not na(shape_atr)
+            stop_c := math.min(stop_c, math.max(close + agg_dist, high + syminfo.mintick))
+    else
+        stop_c := na(stop_c) ? short_stop : math.min(stop_c, short_stop)
+        if tighten_on_2 and not shp_for_S
+            if just_30_closed_2d
+                stop_c := math.min(stop_c, p30h)
+            if just_60_closed_2d
+                stop_c := math.min(stop_c, p60h)
+        if htf_f2d_active and not na(ltf15_high_prev) and not shp_for_S
+            stop_c := math.min(stop_c, ltf15_high_prev)
+        if respect_3 and not na(three_high_short)
+            stop_c := three_high_short
+        if shp_agst_S and not na(shp_tgt_S)
+            stop_c := math.min(stop_c, shp_tgt_S)
+        // Shape FOR (shooter/bear-power) WIDENS the stop up toward the FOR candle's own high - gives room.
+        if shp_for_S and not na(shape_hi)
+            stop_c := math.min(math.max(stop_c, shape_hi), short_stop)
+    disp_c := stop_c
+    disp_dir_c := -1
+    casc_armed_S = casc_arm_after_R <= 0 or (not na(max_r_c) and max_r_c >= casc_arm_after_R)
+    casc_fire_S = use_casc and casc_break_S and casc_armed_S
+    if not na(stop_c) and (high > stop_c or (eng_active and cata_exit_S) or casc_fire_S)
+        casc_exit_evt_c := casc_fire_S and not (high > stop_c)
+        exit_px_c := high > stop_c ? stop_c : close
+        reentry_block_c := true
+        psar_c := na
+        ep_c := na
+        af_c := na
+        flip_f2_c := htf_f2d_active
+        if use_neutral and not dir_long_active
+            state_c := 0
+            stop_c := na
+        else
+            state_c := 1
+            stop_c := long_stop
+else
+    // Neutral. Re-entry guard: only enter when price is on the SAFE side of its stop AND the
+    // post-exit cooldown has cleared (next 15m). Together these stop the re-enter/re-exit churn.
+    disp_c := na
+    disp_dir_c := 0
+    if dir_long_active and close > long_stop and not reentry_block_c
+        state_c := 1
+        stop_c := long_stop
+        if tighten_on_2
+            if just_30_closed_2u
+                stop_c := math.max(stop_c, p30l)
+            if just_60_closed_2u
+                stop_c := math.max(stop_c, p60l)
+        if htf_f2u_active and not na(ltf15_low_prev)
+            stop_c := math.max(stop_c, ltf15_low_prev)
+        if respect_3 and not na(three_low_long)
+            stop_c := three_low_long
+        disp_c := stop_c
+        disp_dir_c := 1
+        flip_f2_c := false
+    else if dir_short_active and close < short_stop and not reentry_block_c
+        state_c := -1
+        stop_c := short_stop
+        if tighten_on_2
+            if just_30_closed_2d
+                stop_c := math.min(stop_c, p30h)
+            if just_60_closed_2d
+                stop_c := math.min(stop_c, p60h)
+        if htf_f2d_active and not na(ltf15_high_prev)
+            stop_c := math.min(stop_c, ltf15_high_prev)
+        if respect_3 and not na(three_high_short)
+            stop_c := three_high_short
+        disp_c := stop_c
+        disp_dir_c := -1
+        flip_f2_c := false
+
+// --- Cascade bookkeeping: on a fresh Classic entry, latch entry close + R and restart the
+//     cascade counter so it only counts minutes AFTER entry. ---
+casc_entered_long_c  = state_c == 1  and state_c[1] != 1
+casc_entered_short_c = state_c == -1 and state_c[1] != -1
+if casc_entered_long_c
+    entry_px_c := close
+    entry_R_c  := math.abs(close - stop_c)
+    casc_run_L := 0
+    max_r_c    := 0.0
+if casc_entered_short_c
+    entry_px_c := close
+    entry_R_c  := math.abs(close - stop_c)
+    casc_run_S := 0
+    max_r_c    := 0.0
+// STICKY arm: track running max favorable R since entry (cummax), never the instantaneous R.
+if state_c == 1 and not na(entry_px_c) and entry_R_c > 0
+    max_r_c := math.max(nz(max_r_c, 0.0), (close - entry_px_c) / entry_R_c)
+if state_c == -1 and not na(entry_px_c) and entry_R_c > 0
+    max_r_c := math.max(nz(max_r_c, 0.0), (entry_px_c - close) / entry_R_c)
+if state_c == 0
+    entry_px_c := na
+    entry_R_c  := na
+    max_r_c    := na
+
+// ---------------- Mike's machine ----------------
+var int    state_m   = 0
+var float  stop_m    = na
+var bool   flip_f2_m = false
+var string reason_m  = ""
+var float  exit_px_m = na   // level where Mike's stop last triggered out (for the X marker)
+if state_m == 1
+    stop_m := na(stop_m) ? long_stop : math.max(stop_m, long_stop)
+    if tighten_on_2 and not shp_for_L
+        if just_30_closed_2u
+            stop_m := math.max(stop_m, p30l)
+        if just_60_closed_2u
+            stop_m := math.max(stop_m, p60l)
+    if htf_f2u_active and not na(ltf15_low_prev) and not shp_for_L
+        stop_m := math.max(stop_m, ltf15_low_prev)
+    if lc_tighten_L and not na(ltf15_low_prev) and not shp_for_L
+        stop_m := math.max(stop_m, ltf15_low_prev)
+    if respect_3 and not na(three_low_long)
+        stop_m := three_low_long
+    if shp_agst_L and not na(shp_tgt_L)
+        stop_m := math.max(stop_m, shp_tgt_L)
+    if shp_for_L and not na(shape_lo)
+        stop_m := math.max(math.min(stop_m, shape_lo), long_stop)
+    exit_m = cata_exit_L or struct_exit_L
+    reason_m := not exit_m ? reason_m : cata_exit_L ? "Catastrophe" : struct_exit_30L ? ("30:" + f_cls(lc30L)) : ("60:" + f_cls(lc60L))
+    if exit_m
+        exit_px_m := cata_exit_L ? close : long_stop
+        reentry_block_m := true
+        flip_f2_m := htf_f2u_active
+        if use_neutral and not dir_short_active
+            state_m := 0
+            stop_m := na
+        else
+            state_m := -1
+            stop_m := short_stop
+else if state_m == -1
+    stop_m := na(stop_m) ? short_stop : math.min(stop_m, short_stop)
+    if tighten_on_2 and not shp_for_S
+        if just_30_closed_2d
+            stop_m := math.min(stop_m, p30h)
+        if just_60_closed_2d
+            stop_m := math.min(stop_m, p60h)
+    if htf_f2d_active and not na(ltf15_high_prev) and not shp_for_S
+        stop_m := math.min(stop_m, ltf15_high_prev)
+    if lc_tighten_S and not na(ltf15_high_prev) and not shp_for_S
+        stop_m := math.min(stop_m, ltf15_high_prev)
+    if respect_3 and not na(three_high_short)
+        stop_m := three_high_short
+    if shp_agst_S and not na(shp_tgt_S)
+        stop_m := math.min(stop_m, shp_tgt_S)
+    if shp_for_S and not na(shape_hi)
+        stop_m := math.min(math.max(stop_m, shape_hi), short_stop)
+    exit_m = cata_exit_S or struct_exit_S
+    reason_m := not exit_m ? reason_m : cata_exit_S ? "Catastrophe" : struct_exit_30S ? ("30:" + f_cls(lc30S)) : ("60:" + f_cls(lc60S))
+    if exit_m
+        exit_px_m := cata_exit_S ? close : short_stop
+        reentry_block_m := true
+        flip_f2_m := htf_f2d_active
+        if use_neutral and not dir_long_active
+            state_m := 0
+            stop_m := na
+        else
+            state_m := 1
+            stop_m := long_stop
+else
+    // Re-entry guard + cooldown (same as Classic).
+    if dir_long_active and close > long_stop and not reentry_block_m
+        state_m := 1
+        stop_m := long_stop
+        if tighten_on_2
+            if just_30_closed_2u
+                stop_m := math.max(stop_m, p30l)
+            if just_60_closed_2u
+                stop_m := math.max(stop_m, p60l)
+        if htf_f2u_active and not na(ltf15_low_prev)
+            stop_m := math.max(stop_m, ltf15_low_prev)
+        if respect_3 and not na(three_low_long)
+            stop_m := three_low_long
+        flip_f2_m := false
+    else if dir_short_active and close < short_stop and not reentry_block_m
+        state_m := -1
+        stop_m := short_stop
+        if tighten_on_2
+            if just_30_closed_2d
+                stop_m := math.min(stop_m, p30h)
+            if just_60_closed_2d
+                stop_m := math.min(stop_m, p60h)
+        if htf_f2d_active and not na(ltf15_high_prev)
+            stop_m := math.min(stop_m, ltf15_high_prev)
+        if respect_3 and not na(three_high_short)
+            stop_m := three_high_short
+        flip_f2_m := false
+
+// ---------------- Primary (markers / bg tint / logging): Mike's when shown, else Classic ----------------
+state             = show_mike ? state_m : state_c
+stop              = show_mike ? stop_m  : stop_c
+last_flip_with_f2 = show_mike ? flip_f2_m : flip_f2_c
+last_exit_reason  = show_mike ? reason_m : "classic"
+
+// === Plots ===
+// Classic: ONE line (the line IS the trigger - a touch flips it).
+// Mike's:  TWO lines - (1) solid = the ENFORCED structural invalidation, (2) dim = the SOFT
+//          tightened ratchet (stop_m) shown for context (not an enforced exit).
+// A near-black halo under each solid line carves a dark moat through same-colored candles.
+sc_color  = disp_dir_c == 1 ? color.new(color.blue,  0) : color.new(color.orange, 0)
+sm_color  = state_m == 1 ? color.new(#00e676,     0) : color.new(#ff1744,      0)
+smt_color = state_m == 1 ? color.new(#00e676,    60) : color.new(#ff1744,     60)
+halo      = color.new(color.black, 10)
+
+mike_inval = state_m == 1 ? long_stop : state_m == -1 ? short_stop : na
+
+// disp_c = the level DRAWN this bar - identical to what the exit is checked against, and still drawn
+// on the exit bar, so a wick that crosses the visible line always produces an X exactly on the line.
+plot(show_classic and disp_dir_c != 0 ? disp_c : na, "Classic Halo", color=halo,     linewidth=5, style=plot.style_steplinebr, editable=false)
+plot(show_classic and disp_dir_c != 0 ? disp_c : na, "Classic Stop", color=sc_color, linewidth=2, style=plot.style_steplinebr)
+
+plot(show_mike and show_mike_tighten and state_m != 0 ? stop_m : na, "Mike Tighten", color=smt_color, linewidth=1, style=plot.style_steplinebr)
+plot(show_mike and state_m != 0 ? mike_inval : na, "Mike Halo", color=halo,    linewidth=5, style=plot.style_steplinebr, editable=false)
+plot(show_mike and state_m != 0 ? mike_inval : na, "Mike Stop", color=sm_color, linewidth=2, style=plot.style_steplinebr)
+
+// Stop-trigger X markers: where the stop ACTUALLY triggered out (exit/flip from a directional
+// state), colored to match the line that triggered. This is the real trail-out point - distinct
+// from the step-line merely re-leveling at an HTF boundary.
+classic_exit_evt = (state_c[1] == 1 or state_c[1] == -1) and state_c != state_c[1]
+mike_exit_evt    = (state_m[1] == 1 or state_m[1] == -1) and state_m != state_m[1]
+classic_exit_col = state_c[1] == 1 ? color.new(color.blue, 0) : color.new(color.orange, 0)
+mike_exit_col    = state_m[1] == 1 ? color.new(#00e676, 0)    : color.new(#ff1744, 0)
+plotshape(show_exit_x and show_classic and classic_exit_evt ? exit_px_c : na, "Classic Exit X", style=shape.xcross, location=location.absolute, color=classic_exit_col, size=size.small)
+plotshape(show_exit_x and show_mike    and mike_exit_evt    ? exit_px_m : na, "Mike Exit X",    style=shape.xcross, location=location.absolute, color=mike_exit_col,    size=size.small)
+// Cascade-break exit: distinct square at the close where the 30m+60m cascade-break (not the
+// structural level) caused the exit. Only relevant in the 'Classic + Cascade Break' version.
+plotshape(show_exit_x and use_casc and casc_exit_evt_c ? exit_px_c : na, "Cascade Break Exit", style=shape.square, location=location.absolute, color=color.new(color.purple, 0), size=size.tiny)
+
+plot(show_htf_levels ? p30l : na, "p30l", color=color.new(color.aqua,    70), linewidth=1, style=plot.style_stepline)
+plot(show_htf_levels ? p60l : na, "p60l", color=color.new(color.teal,    50), linewidth=1, style=plot.style_stepline)
+plot(show_htf_levels ? p30h : na, "p30h", color=color.new(color.fuchsia, 70), linewidth=1, style=plot.style_stepline)
+plot(show_htf_levels ? p60h : na, "p60h", color=color.new(color.purple,  50), linewidth=1, style=plot.style_stepline)
+
+bg_color = state == 1 ? color.new(color.blue, 95) : state == -1 ? color.new(color.orange, 95) : color.new(color.gray, 90)
+bgcolor(show_state_bg ? bg_color : na)
+
+prev_state = nz(state[1], state)
+flip_LS              = (prev_state == 1  and state == -1) or (prev_state == -1 and state == 1)
+exit_to_neutral      = prev_state != 0   and state == 0
+entry_from_neutral_L = prev_state == 0 and state == 1
+entry_from_neutral_S = prev_state == 0 and state == -1
+
+plotshape(show_transitions and flip_LS              ? close : na, "L<->S Flip", style=shape.circle,       location=location.absolute, color=color.yellow,  size=size.small, text="X", textcolor=color.black)
+plotshape(show_transitions and exit_to_neutral      ? close : na, "Exit to N",  style=shape.diamond,      location=location.absolute, color=color.fuchsia, size=size.small, text="N", textcolor=color.white)
+plotshape(show_transitions and entry_from_neutral_L ? close : na, "N -> L",     style=shape.triangleup,   location=location.absolute, color=color.new(color.blue,   0), size=size.small, text="L", textcolor=color.white)
+plotshape(show_transitions and entry_from_neutral_S ? close : na, "N -> S",     style=shape.triangledown, location=location.absolute, color=color.new(color.orange, 0), size=size.small, text="S", textcolor=color.white)
+
+tighten_long_mark  = state == 1  and tighten_on_2 and (just_30_closed_2u or just_60_closed_2u)
+tighten_short_mark = state == -1 and tighten_on_2 and (just_30_closed_2d or just_60_closed_2d)
+plotshape(show_tightens and tighten_long_mark  ? stop : na, "2u Tighten", style=shape.triangleup,   location=location.absolute, color=color.new(color.blue,   0), size=size.tiny)
+plotshape(show_tightens and tighten_short_mark ? stop : na, "2d Tighten", style=shape.triangledown, location=location.absolute, color=color.new(color.orange, 0), size=size.tiny)
+
+var bool prev_f2u = false
+var bool prev_f2d = false
+f2_tighten_long  = state == 1  and htf_f2u_active and not prev_f2u
+f2_tighten_short = state == -1 and htf_f2d_active and not prev_f2d
+prev_f2u := htf_f2u_active
+prev_f2d := htf_f2d_active
+plotshape(show_tightens and f2_tighten_long  ? stop : na, "F2u Tighten", style=shape.diamond, location=location.absolute, color=color.new(color.aqua,    0), size=size.tiny)
+plotshape(show_tightens and f2_tighten_short ? stop : na, "F2d Tighten", style=shape.diamond, location=location.absolute, color=color.new(color.fuchsia, 0), size=size.tiny)
+
+var bool prev_any_3 = false
+three_now = state != 0 and respect_3 and any_3_active and not prev_any_3
+prev_any_3 := any_3_active
+plotshape(show_tightens and three_now ? stop : na, "3 Override", style=shape.xcross, location=location.absolute, color=color.new(color.white, 0), size=size.tiny)
+
+// Candle-shape markers: bullish shape (hammer/bull-power) below the bar, bearish (shooter/bear-power) above.
+plotshape(shape_mark and shape_sign > 0 ? low  : na, "Shape bull", style=shape.triangleup,   location=location.belowbar, color=color.new(color.lime, 0), size=size.tiny, text="H")
+plotshape(shape_mark and shape_sign < 0 ? high : na, "Shape bear", style=shape.triangledown, location=location.abovebar, color=color.new(color.red,  0), size=size.tiny, text="S")
+
+// === Live Class dashboard (active direction) ===
+active_lc30   = state == 1 ? lc30L : state == -1 ? lc30S : na
+active_lc60   = state == 1 ? lc60L : state == -1 ? lc60S : na
+active_note30 = state == 1 ? note30L : state == -1 ? note30S : "neutral"
+var table dash = table.new(position.top_right, 1, 4, border_width=1)
+if show_lc_dash and show_mike and barstate.islast
+    dir_txt = state == 1 ? "LONG" : state == -1 ? "SHORT" : "NEUTRAL"
+    table.cell(dash, 0, 0, "PA Invalidation - Mike's Version", text_color=color.white, bgcolor=color.new(color.blue, 30), text_size=size.small)
+    table.cell(dash, 0, 1, "State: " + dir_txt, text_color=color.white, bgcolor=color.new(color.black, 30), text_size=size.small)
+    table.cell(dash, 0, 2, "30m: " + (na(active_lc30) ? "-" : f_cls(active_lc30)) + "  60m: " + (na(active_lc60) ? "-" : f_cls(active_lc60)), text_color=color.white, bgcolor=color.new(color.black, 30), text_size=size.small)
+    table.cell(dash, 0, 3, active_note30, text_color=color.white, bgcolor=color.new(color.black, 30), text_size=size.small)
+
+// =============================================================================
+// === DIAGNOSTIC LOGGING ======================================================
+// =============================================================================
+var int   last_state_change_bar = -1
+var bool  prev_log_f2u          = false
+var bool  prev_log_f2d          = false
+var float prev_log_stop         = na
+var bool  prev_near_miss_l      = false
+var bool  prev_near_miss_s      = false
+var string prev_lc_str          = ""
+
+state_changed = state != prev_state
+
+if log_flips
+    time_str = str.format("{0,date,yyyy-MM-dd HH:mm:ss}", time)
+    st30_str = curr_30_3 ? "3" : curr_30_2u ? "2u" : curr_30_2d ? "2d" : "1"
+    st60_str = curr_60_3 ? "3" : curr_60_2u ? "2u" : curr_60_2d ? "2d" : "1"
+    st15_str = curr_15_3 ? "3" : (c15h > ltf15_high_prev ? "2u" : (c15l < ltf15_low_prev ? "2d" : "1"))
+    from_str = prev_state == 1 ? "L" : prev_state == -1 ? "S" : "N"
+    to_str   = state      == 1 ? "L" : state      == -1 ? "S" : "N"
+
+    if state_changed
+        bars_since = last_state_change_bar < 0 ? -1 : bar_index - last_state_change_bar
+        since_min = bars_since < 0 ? -1 : bars_since * timeframe.in_seconds() / 60
+        is_whippy = bars_since >= 0 and bars_since < 10
+        chg_msg = (is_whippy ? "WHIPPY_STATE_CHG" : "STATE_CHG") +
+                  " t=" + time_str +
+                  " chart_tf=" + timeframe.period +
+                  " mode=" + version +
+                  " from=" + from_str +
+                  " to=" + to_str +
+                  " reason=" + last_exit_reason +
+                  " with_f2=" + (last_flip_with_f2 ? "T" : "F") +
+                  " since_bars=" + (bars_since < 0 ? "-" : str.tostring(bars_since)) +
+                  " since_min=" + (since_min < 0 ? "-" : str.tostring(since_min, "#")) +
+                  " close=" + str.tostring(close, "#.##") +
+                  " stop=" + str.tostring(stop, "#.##") +
+                  " p30l=" + str.tostring(p30l, "#.##") +
+                  " p30h=" + str.tostring(p30h, "#.##") +
+                  " p60l=" + str.tostring(p60l, "#.##") +
+                  " p60h=" + str.tostring(p60h, "#.##") +
+                  " st15=" + st15_str +
+                  " st30=" + st30_str +
+                  " st60=" + st60_str +
+                  " lc30L=" + f_cls(lc30L) +
+                  " lc60L=" + f_cls(lc60L) +
+                  " lc30S=" + f_cls(lc30S) +
+                  " lc60S=" + f_cls(lc60S) +
+                  " phase30=" + str.tostring(phase30) +
+                  " phase60=" + str.tostring(phase60) +
+                  " f15=" + first15_type +
+                  " dirL=" + (dir_long_active  ? "T" : "F") +
+                  " dirS=" + (dir_short_active ? "T" : "F")
+        if is_whippy
+            log.warning(chg_msg)
+        else
+            log.info(chg_msg)
+        last_state_change_bar := bar_index
+
+    if show_mike
+        lc_str = "30L:" + f_cls(lc30L) + " 60L:" + f_cls(lc60L) + " 30S:" + f_cls(lc30S) + " 60S:" + f_cls(lc60S)
+        if lc_str != prev_lc_str
+            log.info("LIVE_CLASS_CHG t=" + time_str +
+                     " state=" + to_str +
+                     " 30L=" + f_cls(lc30L) + " (" + note30L + ")" +
+                     " 60L=" + f_cls(lc60L) + " (" + note60L + ")" +
+                     " 30S=" + f_cls(lc30S) +
+                     " 60S=" + f_cls(lc60S) +
+                     " phase30=" + str.tostring(phase30) +
+                     " phase60=" + str.tostring(phase60) +
+                     " rungs30[d1=" + (rung1_down ? "T" : "F") + " d2=" + (rung2_down ? "T" : "F") + " u1=" + (rung1_up ? "T" : "F") + " u2=" + (rung2_up ? "T" : "F") + "]" +
+                     " rungs60[d1=" + (r1_60d ? "T" : "F") + " d2=" + (r2_60d ? "T" : "F") + " d3=" + (r3_60d ? "T" : "F") + " u1=" + (r1_60u ? "T" : "F") + " u2=" + (r2_60u ? "T" : "F") + " u3=" + (r3_60u ? "T" : "F") + "]" +
+                     " cataX=" + str.tostring(cata_X, "#.##"))
+            prev_lc_str := lc_str
+
+    if htf_f2u_active and not prev_log_f2u
+        log.info("F2u_ON t=" + time_str + " state=" + to_str + " stop=" + str.tostring(stop, "#.##") + " dirL=" + (dir_long_active ? "T" : "F"))
+    if not htf_f2u_active and prev_log_f2u
+        log.info("F2u_OFF t=" + time_str + " state=" + to_str + " stop=" + str.tostring(stop, "#.##"))
+    prev_log_f2u := htf_f2u_active
+
+    if htf_f2d_active and not prev_log_f2d
+        log.info("F2d_ON t=" + time_str + " state=" + to_str + " stop=" + str.tostring(stop, "#.##") + " dirS=" + (dir_short_active ? "T" : "F"))
+    if not htf_f2d_active and prev_log_f2d
+        log.info("F2d_OFF t=" + time_str + " state=" + to_str + " stop=" + str.tostring(stop, "#.##"))
+    prev_log_f2d := htf_f2d_active
+
+    if any_3_active and not prev_any_3[1]
+        which_3 = curr_15_3 ? "15" : curr_30_3 ? "30" : "60"
+        log.info("THREE_ON t=" + time_str + " which=" + which_3 + " state=" + to_str + " stop=" + str.tostring(stop, "#.##") + " three_low=" + str.tostring(three_low_long, "#.##") + " three_high=" + str.tostring(three_high_short, "#.##"))
+
+    if not na(stop) and (na(prev_log_stop) or stop != prev_log_stop)
+        delta = na(prev_log_stop) ? na : stop - prev_log_stop
+        log.info("STOP_CHG t=" + time_str +
+                 " state=" + to_str +
+                 " from=" + (na(prev_log_stop) ? "-" : str.tostring(prev_log_stop, "#.##")) +
+                 " to=" + str.tostring(stop, "#.##") +
+                 " delta=" + (na(delta) ? "-" : str.tostring(delta, "#.##")) +
+                 " close=" + str.tostring(close, "#.##"))
+        prev_log_stop := stop
+
+    nm_l_now = state == 1  and not na(stop) and c15l >= stop and c15l < stop + (stop * 0.001)
+    nm_s_now = state == -1 and not na(stop) and c15h <= stop and c15h > stop - (stop * 0.001)
+    if nm_l_now and not prev_near_miss_l
+        log.info("NEAR_MISS_L t=" + time_str + " c15l=" + str.tostring(c15l, "#.##") + " stop=" + str.tostring(stop, "#.##") + " diff=" + str.tostring(c15l - stop, "#.##"))
+    if nm_s_now and not prev_near_miss_s
+        log.info("NEAR_MISS_S t=" + time_str + " c15h=" + str.tostring(c15h, "#.##") + " stop=" + str.tostring(stop, "#.##") + " diff=" + str.tostring(c15h - stop, "#.##"))
+    prev_near_miss_l := nm_l_now
+    prev_near_miss_s := nm_s_now

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "strat-core"
+version = "1.0.0"
+description = "Canonical TheStrat definitions: bar states, combos, timeframe continuity. No dependencies."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MPL-2.0" }
+keywords = ["thestrat", "price-action", "trading", "candlestick", "technical-analysis"]
+classifiers = [
+  "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+  "Programming Language :: Python :: 3",
+  "Topic :: Office/Business :: Financial :: Investment",
+  "Intended Audience :: Developers",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/natebking/345-strategies"
+Source = "https://github.com/natebking/345-strategies"
+
+[tool.setuptools.packages.find]
+include = ["strat_core*"]
