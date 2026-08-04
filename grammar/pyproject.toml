@@ -1,0 +1,19 @@
+[project]
+name = "strat-grammar"
+version = "0.1.0"
+description = "Technical definitions of TheStrat's price action states, with a Python reference implementation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MPL-2.0" }
+authors = [{ name = "Nate King" }]
+keywords = ["thestrat", "price-action", "trading", "candlestick", "market-structure"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["strat_grammar*"]

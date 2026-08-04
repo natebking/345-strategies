@@ -39,6 +39,21 @@ Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 - `research/` — Volume Profile research fixtures and diagnostics (MPL-headered; not part of the
   shipped indicator). See `pine/research/README.md`.
 
+### `grammar/` — the Strat grammar (Python)
+
+Technical definitions of the price action states themselves: the four-field model every
+candle reduces to, and the edge cases that make two implementations disagree. `SPEC.md` is
+the definition; `strat_grammar/` is a dependency-free Python reference implementation.
+`tests/test_pine_parity.py` transcribes `detectBarTypeAndFailed` from the shipped Pine and
+compares the two across 40,000 random bars in both detection methods, so the spec can't
+drift from the indicator.
+
+### `pine-draw/` — drawing components (Pine v6)
+
+The rendering layer with everything Strat-specific removed: update-in-place lines and
+boxes, a label pool, and price-based label consolidation. Published as a Pine library for
+anyone building their own script.
+
 ### `docs/`
 
 Start at `docs/README.md` (the index). Trader-facing docs live in `docs/concepts/`, engineering docs in `docs/engineering/`. Highlights:
