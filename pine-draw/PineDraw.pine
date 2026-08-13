@@ -324,33 +324,46 @@ export textSize(string name) =>
 // ============================================================================
 float demoHi20 = ta.highest(high, 20)
 float demoLo20 = ta.lowest(low, 20)
+int   demoHiOff = ta.highestbars(high, 20)
+int   demoLoOff = ta.lowestbars(low, 20)
 
 var LabelPool demoPool = newPool()
 var table demoTag = table.new(tablePos("Bottom Right"), 1, 1, bgcolor = color.new(color.gray, 85))
 
 if barstate.islast
     demoPool.reset()
-    int barMs   = timeframe.in_seconds(timeframe.period) * 1000
-    int startT  = time[19]
-    int endTime = time + barMs * 10
-    float mid   = math.avg(demoHi20, demoLo20)
+    int barMs = timeframe.in_seconds(timeframe.period) * 1000
+    int endT  = time + barMs * 8
+    // Each line starts at the bar where its level actually printed, so every
+    // element has its own length - levels look like levels, not a grid.
+    int   hiT  = time[-demoHiOff]
+    int   loT  = time[-demoLoOff]
+    float mid  = math.avg(demoHi20, demoLo20)
+    int   midT = math.max(hiT, loT)
 
     var line hiLn  = na
     var line loLn  = na
     var line midLn = na
+    var line phLn  = na
+    var line plLn  = na
     var box  rngBx = na
-    hiLn  := updateLine(hiLn,  startT, demoHi20, endTime, demoHi20, color.teal,   2, lineStyle("Solid"))
-    loLn  := updateLine(loLn,  startT, demoLo20, endTime, demoLo20, color.maroon, 2, lineStyle("Solid"))
-    midLn := updateLine(midLn, startT, mid,      endTime, mid,      color.gray,   1, lineStyle("Dotted"))
-    rngBx := updateBox(rngBx, startT, demoHi20, endTime, demoLo20, color.new(color.teal, 92), color.new(color.teal, 100))
+    hiLn  := updateLine(hiLn,  hiT,     demoHi20, endT, demoHi20, color.teal,   2, lineStyle("Solid"))
+    loLn  := updateLine(loLn,  loT,     demoLo20, endT, demoLo20, color.maroon, 2, lineStyle("Solid"))
+    midLn := updateLine(midLn, midT,    mid,      endT, mid,      color.gray,   1, lineStyle("Dotted"))
+    phLn  := updateLine(phLn,  time[1], high[1],  endT, high[1],  color.aqua,   1, lineStyle("Dashed"))
+    plLn  := updateLine(plLn,  time[1], low[1],   endT, low[1],   color.orange, 1, lineStyle("Dashed"))
+    rngBx := updateBox(rngBx, math.min(hiT, loT), demoHi20, endT, demoLo20, color.new(color.teal, 94), color.new(color.teal, 100))
 
+    // Transparent label backgrounds: the colored text sits at each line's end
+    // and reads as the line's own tag. When the prior bar IS the 20-bar high,
+    // the two rows merge into one, keeping the first entry's color.
     cset = newColoredSet()
     cset.add(demoHi20, "20-bar high", color.teal,   int(na), " + ", syminfo.mintick)
     cset.add(demoLo20, "20-bar low",  color.maroon, int(na), " + ", syminfo.mintick)
     cset.add(mid,      "midpoint",    color.gray,   int(na), " + ", syminfo.mintick)
     cset.add(high[1],  "prior high",  color.aqua,   int(na), " + ", syminfo.mintick)
     cset.add(low[1],   "prior low",   color.orange, int(na), " + ", syminfo.mintick)
-    cset.flush(demoPool, endTime, false, color.new(color.black, 15), textSize("Small"))
+    cset.flush(demoPool, endT, false, color.new(color.black, 100), textSize("Small"))
     demoPool.trim()
 
     table.cell(demoTag, 0, 0, "PineDraw demo", text_color = color.gray, text_size = size.small)
