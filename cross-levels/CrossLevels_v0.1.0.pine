@@ -1064,7 +1064,7 @@ dbgF(float x) =>
 dbgT(int t) =>
     na(t) or t == 0 ? "na" : str.format_time(t, "MM-dd HH:mm", tz)
 
-var table dbgTbl = debugOn ? table.new(position.middle_left, 2, 14, bgcolor = color.new(color.black, 20), border_width = 1, border_color = color.new(color.gray, 60)) : table(na)
+var table dbgTbl = debugOn ? table.new(position.middle_left, 2, 18, bgcolor = color.new(color.black, 20), border_width = 1, border_color = color.new(color.gray, 60)) : table(na)
 
 dbgRow(int r, string k, string v) =>
     table.cell(dbgTbl, 0, r, k, text_color = color.silver, text_size = size.tiny, text_halign = text.align_left)
@@ -1085,3 +1085,7 @@ if debugOn and barstate.islast
     dbgRow(11, "NYPM eff",   dbgF(array.get(kzEffDnH, 4)) + " @ " + dbgT(array.get(kzEffDnT, 4)))
     dbgRow(12, "NYPM stamp|drawn", dbgF(array.get(kzEffBH, 4)) + " | " + dbgF(convToChart(array.get(kzEffDnH, 4), array.get(kzEffBH, 4))))
     dbgRow(13, "confirmed bars", str.tostring(dbgConfirmed))
+    dbgRow(14, "PD eff",  dbgF(array.get(dwmEffH, 0)) + "/" + dbgF(array.get(dwmEffL, 0)) + " @ " + dbgT(array.get(dwmEffT, 0)))
+    dbgRow(15, "PD cur",  dbgF(array.get(dwmCHArr, 0)) + "/" + dbgF(array.get(dwmCLArr, 0)) + " @ " + dbgT(array.get(dwmCTArr, 0)))
+    dbgRow(16, "PD key",  dbgT(array.get(dwmKeyT, 0)))
+    dbgRow(17, "rth prev", str.tostring(dwmRthPrev) + " (futMode " + str.tostring(futMode) + ")")
