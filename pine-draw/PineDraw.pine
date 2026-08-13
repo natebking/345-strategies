@@ -376,17 +376,20 @@ if barstate.islast
     midLn := updateLine(midLn, midT,    mid,      endT,  mid,      color.gray,   1, lineStyle("Dotted"))
     phLn  := updateLine(phLn,  time[1], high[1],  endT2, high[1],  color.aqua,   1, lineStyle("Dashed"))
     plLn  := updateLine(plLn,  time[1], low[1],   endT2, low[1],   color.orange, 1, lineStyle("Dashed"))
-    rngBx := updateBox(rngBx, math.min(hiT, loT), demoHi20, endT, demoLo20, color.new(color.teal, 94), color.new(color.teal, 100))
+    rngBx := updateBox(rngBx, math.min(hiT, loT), demoHi20, endT, demoLo20, color.new(color.teal, 85), color.new(color.teal, 100))
 
-    // Chip labels, each at its own line's end. When the prior bar IS the
-    // 20-bar high, the two rows merge into one chip that keeps the first
-    // entry's color and anchor.
+    // Chip labels, each at its own line's end. The box's edge rows sit at
+    // exactly the 20-bar extreme prices, so those rows always merge: every
+    // chart shows "20-bar high + range top" as one chip, which is the
+    // consolidation doing its job rather than two chips stacked unreadably.
     cset = newColoredSet()
-    cset.add(demoHi20, "20-bar high", color.teal,   int(na), " + ", syminfo.mintick)
-    cset.add(demoLo20, "20-bar low",  color.maroon, int(na), " + ", syminfo.mintick)
-    cset.add(mid,      "midpoint",    color.gray,   int(na), " + ", syminfo.mintick)
-    cset.add(high[1],  "prior high",  color.aqua,   endT2,   " + ", syminfo.mintick)
-    cset.add(low[1],   "prior low",   color.orange, endT2,   " + ", syminfo.mintick)
+    cset.add(demoHi20, "20-bar high",  color.teal,   int(na), " + ", syminfo.mintick)
+    cset.add(demoHi20, "range top",    color.teal,   int(na), " + ", syminfo.mintick)
+    cset.add(demoLo20, "20-bar low",   color.maroon, int(na), " + ", syminfo.mintick)
+    cset.add(demoLo20, "range bottom", color.maroon, int(na), " + ", syminfo.mintick)
+    cset.add(mid,      "midpoint",     color.gray,   int(na), " + ", syminfo.mintick)
+    cset.add(high[1],  "prior high",   color.aqua,   endT2,   " + ", syminfo.mintick)
+    cset.add(low[1],   "prior low",    color.orange, endT2,   " + ", syminfo.mintick)
     cset.flushChips(demoPool, endT, false, color.white, textSize("Small"))
     demoPool.trim()
 
