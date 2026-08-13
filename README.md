@@ -54,6 +54,13 @@ The rendering layer with everything Strat-specific removed: update-in-place line
 boxes, a label pool, and price-based label consolidation. Published as a Pine library for
 anyone building their own script.
 
+### `cross-levels/` — ES ↔ SPY/SPX level translation (Pine v6)
+
+A standalone overlay that converts price levels between ES futures and the cash market
+through a live basis: killzone session highs and lows, opening prices, prior day/week/month
+levels, and SPY overnight gap boxes on ES. Built on the `pine-draw/` library. Not published
+on TradingView. See `cross-levels/README.md`.
+
 ### `docs/`
 
 Start at `docs/README.md` (the index). Trader-facing docs live in `docs/concepts/`, engineering docs in `docs/engineering/`. Highlights:

@@ -19,7 +19,7 @@ Add the library to your script:
 ```pine
 //@version=6
 indicator("My Levels", overlay = true)
-import natebking/PineDraw/1 as draw
+import SpinTrades/PineDraw/1 as draw
 
 var draw.LabelPool pool = draw.newPool()
 var line priorHigh = na
@@ -50,7 +50,13 @@ Labels overlap by pixels, not by price, and Pine cannot measure pixels. A tolera
 
 ## Status
 
-Version 0.1.0, published as a Pine library. The primitives are the ones running in TheStrat Suite; the `LabelSet` grouping is a generalization of the consolidation in that script, with the tolerance made an argument instead of being fixed at one tick.
+Published on TradingView as `SpinTrades/PineDraw/1` (2026-08-12):
+https://www.tradingview.com/script/L1Yo5Rir-PineDraw/
+
+The primitives are the ones running in TheStrat Suite; the `LabelSet` grouping is a
+generalization of the consolidation in that script, with the tolerance made an argument
+instead of being fixed at one tick. Version-to-commit mapping lives in the root
+`PUBLISHED.md`.
 
 ## License
 
