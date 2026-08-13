@@ -10,7 +10,9 @@ Nothing here knows anything about TheStrat, or about any strategy. It is the lay
 
 **A label pool.** Labels are the easiest way to blow the object budget, because most scripts recreate all of them on every bar. `LabelPool` keeps them allocated and rewrites their contents. Call `reset()` at the top of a render pass and `acquire()` once per label; anything left over from the previous pass is blanked rather than deleted, so the next pass reuses it.
 
-**Price consolidation.** Two levels at the same price produce two labels stacked on the same pixel row, and the text becomes unreadable. `LabelSet` groups labels by price with a tolerance you choose, merging them into one row. This is the difference between a script that scales to several timeframes and one that doesn't.
+**Price consolidation.** Two levels at the same price produce two labels stacked on the same pixel row, and the text becomes unreadable. `LabelSet` groups labels by price with a tolerance you choose, merging them into one row. This is the difference between a script that scales to several timeframes and one that doesn't. `ColoredLabelSet` is the version that matters once your levels come from different sources: each row keeps its first entry's text color and time anchor, later entries append their text, and an entry whose text is already present is skipped instead of repeated.
+
+**A tight pass lifecycle.** `reset()` starts a render pass and `trim()` ends it, deleting every pooled label beyond the ones acquired — so switching a feature off removes its labels instead of leaving blanks against the object cap. `tablePos()` maps a position dropdown to the table constant, because every script with a settings table writes that switch eventually.
 
 ## Use
 
@@ -19,21 +21,22 @@ Add the library to your script:
 ```pine
 //@version=6
 indicator("My Levels", overlay = true)
-import SpinTrades/PineDraw/1 as draw
+import SpinTrades/PineDraw/2 as draw
 
 var draw.LabelPool pool = draw.newPool()
 var line priorHigh = na
 
 if barstate.islast
     pool.reset()
-    endTime = time + (time - time[1]) * 10
+    endTime = time + timeframe.in_seconds(timeframe.period) * 1000 * 10
 
     priorHigh := draw.updateLine(priorHigh, time[1], high[1], endTime, high[1], color.teal, 1, draw.lineStyle("Dashed"))
 
-    set = draw.newSet()
-    set.add(high[1], "prior high", " + ", syminfo.mintick)
-    set.add(low[1],  "prior low",  " + ", syminfo.mintick)
-    set.flush(pool, endTime, false, color.new(color.black, 20), color.white, draw.textSize("Small"))
+    set = draw.newColoredSet()
+    set.add(high[1], "prior high", color.teal,   int(na), " + ", syminfo.mintick)
+    set.add(low[1],  "prior low",  color.maroon, int(na), " + ", syminfo.mintick)
+    set.flush(pool, endTime, false, color.new(color.black, 20), draw.textSize("Small"))
+    pool.trim()
 ```
 
 `PineDraw.pine` includes that demo at the bottom, so you can paste the whole file into the Pine editor and see it run before importing anything.
