@@ -207,12 +207,13 @@ export method flush(LabelSet this, LabelPool pool, int x, bool useBarIndex, colo
             pool.acquire(x, array.get(this.prices, i), array.get(this.texts, i), useBarIndex, bg, txtCol, sz)
     n
 
-// @type A set of labels-to-be where every entry keeps its own text color and, optionally,
-//   its own time anchor. The first entry at a price wins the row's color and anchor;
-//   later entries only append text.
+// @type A set of labels-to-be where every entry keeps its own color and, optionally, its
+//   own time anchor. The first entry at a price wins the row's color and anchor; later
+//   entries only append text. Draw with flushChips (row color as the label background)
+//   or flushText (transparent background, row color as the text).
 // @field prices One entry per distinct price.
 // @field texts  The merged text for each price.
-// @field colors The text color of each row (first entry wins).
+// @field colors The color of each row (first entry wins).
 // @field times  The time anchor of each row (first entry wins; na means "use the flush anchor").
 export type ColoredLabelSet
     array<float> prices
@@ -255,23 +256,42 @@ export method add(ColoredLabelSet this, float price, string txt, color txtColor,
         array.push(this.times, t)
     this
 
-// @function Draw a consolidated colored set through a pool. Rows with a stored time anchor
+// @function Draw a consolidated set as solid chip labels: each row's color becomes its
+//   label background. This is the classic level-tag look. Rows with a stored time anchor
 //   draw there; rows without one draw at x. When useBarIndex is true, stored times are
 //   ignored and every row draws at x, since the two coordinate spaces cannot mix.
 // @param this The set to draw.
 // @param pool The label pool to draw through.
 // @param x Fallback anchor: bar time in ms, or a bar index when useBarIndex is true.
 // @param useBarIndex Anchor to bar_index instead of bar time.
-// @param bg Background color for every row.
+// @param txtCol Text color for every chip, for example color.white.
 // @param sz Text size for every row.
 // @returns The number of labels drawn.
-export method flush(ColoredLabelSet this, LabelPool pool, int x, bool useBarIndex, color bg, string sz) =>
+export method flushChips(ColoredLabelSet this, LabelPool pool, int x, bool useBarIndex, color txtCol, string sz) =>
     int n = array.size(this.prices)
     if n > 0
         for i = 0 to n - 1
             int t = array.get(this.times, i)
             int xa = useBarIndex or na(t) ? x : t
-            pool.acquire(xa, array.get(this.prices, i), array.get(this.texts, i), useBarIndex, bg, array.get(this.colors, i), sz)
+            pool.acquire(xa, array.get(this.prices, i), array.get(this.texts, i), useBarIndex, array.get(this.colors, i), txtCol, sz)
+    n
+
+// @function Draw a consolidated set as transparent tag text: each row's color becomes its
+//   text color and the background is invisible, so the text reads as part of its line.
+//   Anchoring behaves exactly like flushChips.
+// @param this The set to draw.
+// @param pool The label pool to draw through.
+// @param x Fallback anchor: bar time in ms, or a bar index when useBarIndex is true.
+// @param useBarIndex Anchor to bar_index instead of bar time.
+// @param sz Text size for every row.
+// @returns The number of labels drawn.
+export method flushText(ColoredLabelSet this, LabelPool pool, int x, bool useBarIndex, string sz) =>
+    int n = array.size(this.prices)
+    if n > 0
+        for i = 0 to n - 1
+            int t = array.get(this.times, i)
+            int xa = useBarIndex or na(t) ? x : t
+            pool.acquire(xa, array.get(this.prices, i), array.get(this.texts, i), useBarIndex, color.new(color.black, 100), array.get(this.colors, i), sz)
     n
 
 // ============================================================================
@@ -333,7 +353,11 @@ var table demoTag = table.new(tablePos("Bottom Right"), 1, 1, bgcolor = color.ne
 if barstate.islast
     demoPool.reset()
     int barMs = timeframe.in_seconds(timeframe.period) * 1000
+    // Two right edges: the 20-bar levels extend eight bars out, the prior-bar
+    // stubs three. Their labels anchor at their own line's end through the
+    // set's stored times, so the chips sit at different x positions.
     int endT  = time + barMs * 8
+    int endT2 = time + barMs * 3
     // Each line starts at the bar where its level actually printed, so every
     // element has its own length - levels look like levels, not a grid.
     int   hiT  = time[-demoHiOff]
@@ -347,23 +371,23 @@ if barstate.islast
     var line phLn  = na
     var line plLn  = na
     var box  rngBx = na
-    hiLn  := updateLine(hiLn,  hiT,     demoHi20, endT, demoHi20, color.teal,   2, lineStyle("Solid"))
-    loLn  := updateLine(loLn,  loT,     demoLo20, endT, demoLo20, color.maroon, 2, lineStyle("Solid"))
-    midLn := updateLine(midLn, midT,    mid,      endT, mid,      color.gray,   1, lineStyle("Dotted"))
-    phLn  := updateLine(phLn,  time[1], high[1],  endT, high[1],  color.aqua,   1, lineStyle("Dashed"))
-    plLn  := updateLine(plLn,  time[1], low[1],   endT, low[1],   color.orange, 1, lineStyle("Dashed"))
+    hiLn  := updateLine(hiLn,  hiT,     demoHi20, endT,  demoHi20, color.teal,   2, lineStyle("Solid"))
+    loLn  := updateLine(loLn,  loT,     demoLo20, endT,  demoLo20, color.maroon, 2, lineStyle("Solid"))
+    midLn := updateLine(midLn, midT,    mid,      endT,  mid,      color.gray,   1, lineStyle("Dotted"))
+    phLn  := updateLine(phLn,  time[1], high[1],  endT2, high[1],  color.aqua,   1, lineStyle("Dashed"))
+    plLn  := updateLine(plLn,  time[1], low[1],   endT2, low[1],   color.orange, 1, lineStyle("Dashed"))
     rngBx := updateBox(rngBx, math.min(hiT, loT), demoHi20, endT, demoLo20, color.new(color.teal, 94), color.new(color.teal, 100))
 
-    // Transparent label backgrounds: the colored text sits at each line's end
-    // and reads as the line's own tag. When the prior bar IS the 20-bar high,
-    // the two rows merge into one, keeping the first entry's color.
+    // Chip labels, each at its own line's end. When the prior bar IS the
+    // 20-bar high, the two rows merge into one chip that keeps the first
+    // entry's color and anchor.
     cset = newColoredSet()
     cset.add(demoHi20, "20-bar high", color.teal,   int(na), " + ", syminfo.mintick)
     cset.add(demoLo20, "20-bar low",  color.maroon, int(na), " + ", syminfo.mintick)
     cset.add(mid,      "midpoint",    color.gray,   int(na), " + ", syminfo.mintick)
-    cset.add(high[1],  "prior high",  color.aqua,   int(na), " + ", syminfo.mintick)
-    cset.add(low[1],   "prior low",   color.orange, int(na), " + ", syminfo.mintick)
-    cset.flush(demoPool, endT, false, color.new(color.black, 100), textSize("Small"))
+    cset.add(high[1],  "prior high",  color.aqua,   endT2,   " + ", syminfo.mintick)
+    cset.add(low[1],   "prior low",   color.orange, endT2,   " + ", syminfo.mintick)
+    cset.flushChips(demoPool, endT, false, color.white, textSize("Small"))
     demoPool.trim()
 
     table.cell(demoTag, 0, 0, "PineDraw demo", text_color = color.gray, text_size = size.small)

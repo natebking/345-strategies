@@ -35,7 +35,7 @@ if barstate.islast
     set = draw.newColoredSet()
     set.add(high[1], "prior high", color.teal,   int(na), " + ", syminfo.mintick)
     set.add(low[1],  "prior low",  color.maroon, int(na), " + ", syminfo.mintick)
-    set.flush(pool, endTime, false, color.new(color.black, 20), draw.textSize("Small"))
+    set.flushChips(pool, endTime, false, color.white, draw.textSize("Small"))
     pool.trim()
 ```
 
