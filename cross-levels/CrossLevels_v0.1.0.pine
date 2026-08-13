@@ -423,8 +423,14 @@ var int   spxFreshCloseT = na
 
 // A pair is fresh only when both legs closed the SAME bar (FIX BASIS-PAIR-1);
 // price equality across mismatched timestamps is how a basis goes wrong.
-bool spyPairFresh = not na(esCloseG) and not na(spyCloseG) and esTcG == spyTcG
-bool spxPairFresh = not na(esCloseG) and not na(spxCloseG) and esTcG == spxTcG
+// FIX BASIS-CONF-1 (2026-08-13): every basis mutation below - raw updates,
+// scheduled anchors, the drift backstop - runs on confirmed bars only. On
+// the realtime bar the legs serve DEVELOPING values tick by tick, and the
+// first prints after the cash open swing the raw basis enough to trip
+// anchors intrabar, re-pricing every line on ticks. Confirmed-only means
+// intrabar can re-render but never re-price, and live matches reload.
+bool spyPairFresh = barstate.isconfirmed and not na(esCloseG) and not na(spyCloseG) and esTcG == spyTcG
+bool spxPairFresh = barstate.isconfirmed and not na(esCloseG) and not na(spxCloseG) and esTcG == spxTcG
 if spyPairFresh
     basisSpy10     := esCloseG - spyCloseG * 10
     spyFreshCloseT := spyTcG
@@ -659,7 +665,7 @@ var array<float> opB    = array.new<float>(3)
 
 for i = 0 to 2
     int oT = array.get(opTArr, i)
-    if not na(oT) and oT != array.get(opKeyT, i)
+    if barstate.isconfirmed and not na(oT) and oT != array.get(opKeyT, i)
         array.set(opKeyT, i, oT)
         array.set(opMit, i, false)
         array.set(opMitT, i, 0)
@@ -755,7 +761,7 @@ var array<float> gapBPrvArr  = array.new<float>()
 var array<float> gapBOpnArr  = array.new<float>()
 var int          lastGapKey  = 0
 
-if not na(gRthOT) and gRthOT != lastGapKey
+if barstate.isconfirmed and not na(gRthOT) and gRthOT != lastGapKey
     lastGapKey := gRthOT
     if not na(gPrvC) and not na(gPrvCT) and math.abs(gRthO - gPrvC) >= minGapSize
         array.push(gapPrvCArr, gPrvC)
@@ -865,7 +871,11 @@ if barstate.islast
     lblPool.reset()
 
     // Anchor geometry from served bar times only - never timenow.
-    int lineEnd = na(time[1]) ? time : time + (time - time[1]) * labelOffsetBars
+    // FIX LINEEND-GAP-1 (2026-08-13): bar spacing comes from the chart
+    // timeframe, never from time - time[1] - on the first bar after an
+    // overnight or weekend gap that difference is hours, and the right edge
+    // leapt a week out.
+    int lineEnd = time + timeframe.in_seconds(timeframe.period) * 1000 * labelOffsetBars
 
     bool tfOk   = timeframe.isintraday and timeframe.in_seconds() <= timeframe.in_seconds(tfLimit)
     bool drawOk = recognized and tfOk
@@ -983,8 +993,8 @@ if barstate.islast
     else if showTable
         bool  activeIsSpy = futMode ? cashIsSpy : chartIsSpy
         float activeBasis = activeIsSpy ? basisSpy10 : basisSpx
-        bool  freshNow    = activeIsSpy ? spyPairFresh : spxPairFresh
         int   freshT      = activeIsSpy ? spyFreshCloseT : spxFreshCloseT
+        bool  freshNow    = not na(freshT) and time_close - freshT <= timeframe.in_seconds(timeframe.period) * 2000
         string dirTxt   = futMode ? "Futures  ES ← " + cashSource : "Cash  " + (chartIsSpy ? "SPY" : "SPX") + " ← ES"
         string basisTxt = (activeIsSpy ? "SPY×10 " : "SPX ") + (na(activeBasis) ? "n/a" : (activeBasis >= 0 ? "+" : "") + str.tostring(activeBasis, "#.##"))
         string stateTxt = na(activeBasis) ? "no overlap bar yet" : freshNow ? "live" : "frozen " + str.format_time(freshT, "HH:mm", tz)
