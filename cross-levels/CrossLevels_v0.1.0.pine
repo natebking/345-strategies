@@ -525,18 +525,59 @@ convSpyToEs(float p, float b) =>
 // same stamps and mode the render uses, so a level is judged exactly where
 // it is drawn.
 
-// Served values as fixed-size arrays for loop processing (rebuilt each bar).
-array<float> kzLvHArr = array.from(kz1LvH, kz2LvH, kz3LvH, kz4LvH, kz5LvH, kz6LvH)
-array<float> kzLvLArr = array.from(kz1LvL, kz2LvL, kz3LvL, kz4LvL, kz5LvL, kz6LvL)
-array<int>   kzLvTArr = array.from(kz1LvT, kz2LvT, kz3LvT, kz4LvT, kz5LvT, kz6LvT)
-array<float> kzDnHArr = array.from(kz1DnH, kz2DnH, kz3DnH, kz4DnH, kz5DnH, kz6DnH)
-array<float> kzDnLArr = array.from(kz1DnL, kz2DnL, kz3DnL, kz4DnL, kz5DnL, kz6DnL)
-array<int>   kzDnTArr = array.from(kz1DnT, kz2DnT, kz3DnT, kz4DnT, kz5DnT, kz6DnT)
-array<float> opPArr   = array.from(op1P, op2P, op3P)
-array<int>   opTArr   = array.from(op1T, op2T, op3T)
-array<float> dwmHArr  = array.from(pdH, pwH, pmH)
-array<float> dwmLArr  = array.from(pdL, pwL, pmL)
-array<int>   dwmTArr  = array.from(pdT, pwT, pmT)
+// Served values as fixed-size arrays for loop processing.
+// FIX PERF-ALLOC-1 (2026-08-13): these were rebuilt with array.from on EVERY
+// bar - fourteen allocations per bar across the file, over half a million on
+// a fully loaded chart, which is what pushed total runtime toward the
+// platform's 20-second cap. Allocated once now, refilled in place.
+set6f(array<float> a, float v1, float v2, float v3, float v4, float v5, float v6) =>
+    array.set(a, 0, v1)
+    array.set(a, 1, v2)
+    array.set(a, 2, v3)
+    array.set(a, 3, v4)
+    array.set(a, 4, v5)
+    array.set(a, 5, v6)
+
+set6i(array<int> a, int v1, int v2, int v3, int v4, int v5, int v6) =>
+    array.set(a, 0, v1)
+    array.set(a, 1, v2)
+    array.set(a, 2, v3)
+    array.set(a, 3, v4)
+    array.set(a, 4, v5)
+    array.set(a, 5, v6)
+
+set3f(array<float> a, float v1, float v2, float v3) =>
+    array.set(a, 0, v1)
+    array.set(a, 1, v2)
+    array.set(a, 2, v3)
+
+set3i(array<int> a, int v1, int v2, int v3) =>
+    array.set(a, 0, v1)
+    array.set(a, 1, v2)
+    array.set(a, 2, v3)
+
+var array<float> kzLvHArr = array.new<float>(6)
+var array<float> kzLvLArr = array.new<float>(6)
+var array<int>   kzLvTArr = array.new<int>(6)
+var array<float> kzDnHArr = array.new<float>(6)
+var array<float> kzDnLArr = array.new<float>(6)
+var array<int>   kzDnTArr = array.new<int>(6)
+var array<float> opPArr   = array.new<float>(3)
+var array<int>   opTArr   = array.new<int>(3)
+var array<float> dwmHArr  = array.new<float>(3)
+var array<float> dwmLArr  = array.new<float>(3)
+var array<int>   dwmTArr  = array.new<int>(3)
+set6f(kzLvHArr, kz1LvH, kz2LvH, kz3LvH, kz4LvH, kz5LvH, kz6LvH)
+set6f(kzLvLArr, kz1LvL, kz2LvL, kz3LvL, kz4LvL, kz5LvL, kz6LvL)
+set6i(kzLvTArr, kz1LvT, kz2LvT, kz3LvT, kz4LvT, kz5LvT, kz6LvT)
+set6f(kzDnHArr, kz1DnH, kz2DnH, kz3DnH, kz4DnH, kz5DnH, kz6DnH)
+set6f(kzDnLArr, kz1DnL, kz2DnL, kz3DnL, kz4DnL, kz5DnL, kz6DnL)
+set6i(kzDnTArr, kz1DnT, kz2DnT, kz3DnT, kz4DnT, kz5DnT, kz6DnT)
+set3f(opPArr, op1P, op2P, op3P)
+set3i(opTArr, op1T, op2T, op3T)
+set3f(dwmHArr, pdH, pwH, pmH)
+set3f(dwmLArr, pdL, pwL, pmL)
+set3i(dwmTArr, pdT, pwT, pmT)
 
 // Input-derived per-slot config (inputs are constant, so var + build once).
 var array<bool>   kzOnArr   = array.from(useKz1, useKz2, useKz3, useKz4, useKz5, useKz6)
@@ -625,7 +666,12 @@ for i = 0 to 5
         array.set(kzHiMitT, i, 0)
         array.set(kzLoMit, i, false)
         array.set(kzLoMitT, i, 0)
-    bool chIn = not na(time(timeframe.period, array.get(kzSessArr, i), tz))
+    // Session-window checks only matter for the cash-close promotion, which
+    // only a cash SOURCE needs (futures mode) - skip six time() parses per
+    // bar everywhere else (FIX PERF-ALLOC-1).
+    bool chIn = false
+    if futMode
+        chIn := not na(time(timeframe.period, array.get(kzSessArr, i), tz))
     if not chIn and array.get(kzChIn, i)
         // Chart clock just exited the window. Promote a still-live served
         // session (non-na live tuple whose start is not already the key);
@@ -690,9 +736,12 @@ for i = 0 to 2
 // period's extremes are watched from the served tuple and stamped as each
 // prints; on roll or promotion the forming stamps become the prior stamps.
 // The midpoint converts with the average of the two.
-array<float> dwmCHArr = array.from(pdCH, pwCH, pmCH)
-array<float> dwmCLArr = array.from(pdCL, pwCL, pmCL)
-array<int>   dwmCTArr = array.from(pdCT, pwCT, pmCT)
+var array<float> dwmCHArr = array.new<float>(3)
+var array<float> dwmCLArr = array.new<float>(3)
+var array<int>   dwmCTArr = array.new<int>(3)
+set3f(dwmCHArr, pdCH, pwCH, pmCH)
+set3f(dwmCLArr, pdCL, pwCL, pmCL)
+set3i(dwmCTArr, pdCT, pwCT, pmCT)
 var array<int>   dwmKeyT   = array.new<int>(3, 0)
 var array<int>   dwmCurKey = array.new<int>(3, 0)
 var array<float> dwmEffH   = array.new<float>(3)
@@ -734,7 +783,9 @@ if barstate.isconfirmed
     // Cash-close promotion (futures mode, day slot). On the confirmed bar
     // after the chart exits the cash RTH window, the source's forming day is
     // final even though it has not rolled; promote it.
-    bool dwmRthIn = not na(time(timeframe.period, "0930-1600", tz))
+    bool dwmRthIn = false
+    if futMode
+        dwmRthIn := not na(time(timeframe.period, "0930-1600", tz))
     if futMode and not dwmRthIn and dwmRthPrev
         float cH0 = array.get(dwmCHArr, 0)
         float cL0 = array.get(dwmCLArr, 0)
