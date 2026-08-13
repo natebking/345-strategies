@@ -53,8 +53,8 @@ Labels overlap by pixels, not by price, and Pine cannot measure pixels. A tolera
 
 ## Status
 
-Published on TradingView as `SpinTrades/PineDraw/1` (2026-08-12):
-https://www.tradingview.com/script/L1Yo5Rir-PineDraw/
+Published on TradingView, current import `SpinTrades/PineDraw/2` (v2, 2026-08-13;
+v1 2026-08-12): https://www.tradingview.com/script/L1Yo5Rir-PineDraw/
 
 The primitives are the ones running in TheStrat Suite; the `LabelSet` grouping is a
 generalization of the consolidation in that script, with the tolerance made an argument

@@ -50,7 +50,7 @@ indicator(
      max_boxes_count = 200,
      max_bars_back = 200)
 
-import SpinTrades/PineDraw/1 as draw
+import SpinTrades/PineDraw/2 as draw
 
 
 // ============================================================================
@@ -801,35 +801,12 @@ if array.size(gapStartArr) > 0
 // SECTION 8: RENDER HELPERS
 // ============================================================================
 
-// Consolidate labels by mintick-rounded price: the first entry at a price wins
-// the color, later entries append text with " + ". The dedupe guard keeps a
-// live and a completed line of the same killzone from printing twice when they
-// land on the same price. Prices arrive already rounded through convToChart.
-addLevelLabel(map<float, int> idx, array<float> ps, array<string> ts, array<color> cs, float price, string txt, color col) =>
-    if not na(price)
-        if map.contains(idx, price)
-            int i = map.get(idx, price)
-            string cur = array.get(ts, i)
-            if not str.contains(cur, txt)
-                array.set(ts, i, cur + " + " + txt)
-        else
-            map.put(idx, price, array.size(ps))
-            array.push(ps, price)
-            array.push(ts, txt)
-            array.push(cs, col)
-
-tablePosOf(string s) =>
-    switch s
-        "Bottom Center" => position.bottom_center
-        "Bottom Left"   => position.bottom_left
-        "Bottom Right"  => position.bottom_right
-        "Middle Center" => position.middle_center
-        "Middle Left"   => position.middle_left
-        "Middle Right"  => position.middle_right
-        "Top Center"    => position.top_center
-        "Top Left"      => position.top_left
-        "Top Right"     => position.top_right
-        => position.bottom_right
+// Label consolidation is PineDraw's ColoredLabelSet (exact-match merge on
+// prices already rounded through convToChart; the first entry at a price wins
+// the color, and a duplicate text on a row is skipped - a live and a
+// completed line of the same killzone print once). The flush below stays
+// local for one reason: the merged row's price is appended a single time
+// AFTER merging, so "A + B 769.33" prints one price, not one per source.
 
 
 // ============================================================================
@@ -858,7 +835,7 @@ var string styleMain = draw.lineStyle(lineStyleIn)
 var string styleOpen = draw.lineStyle(openStyleIn)
 var string styleDwm  = draw.lineStyle(dwmStyleIn)
 var string lblSz     = draw.textSize(labelSizeIn)
-var string tablePosC = tablePosOf(tablePosIn)
+var string tablePosC = draw.tablePos(tablePosIn)
 
 // Info table: created once, cells rewritten on the last bar. Tables are their
 // own object class and do not consume the line/box/label budget.
@@ -881,10 +858,7 @@ if barstate.islast
     bool drawOk = recognized and tfOk
 
     // Label collection for this pass: map from rounded price to entry index.
-    map<float, int> lblIdx = map.new<float, int>()
-    array<float>  lblP = array.new<float>()
-    array<string> lblT = array.new<string>()
-    array<color>  lblC = array.new<color>()
+    draw.ColoredLabelSet cset = draw.newColoredSet()
 
     string srcName = futMode ? cashSource : "ES"
 
@@ -904,13 +878,13 @@ if barstate.islast
         if kzEn and not na(dH) and not na(dT) and not (hideMitigated and array.get(kzHiMit, i))
             int x2h = array.get(kzHiMit, i) ? array.get(kzHiMitT, i) : lineEnd
             array.set(kzDnHiLn, i, draw.updateLine(array.get(kzDnHiLn, i), dT, dH, x2h, dH, kzCol, lineWidthIn, styleMain))
-            addLevelLabel(lblIdx, lblP, lblT, lblC, dH, kzNm + " H", kzCol)
+            cset.add(dH, kzNm + " H", kzCol, int(na), " + ", 0)
         else
             array.set(kzDnHiLn, i, draw.clearLine(array.get(kzDnHiLn, i)))
         if kzEn and not na(dL) and not na(dT) and not (hideMitigated and array.get(kzLoMit, i))
             int x2l = array.get(kzLoMit, i) ? array.get(kzLoMitT, i) : lineEnd
             array.set(kzDnLoLn, i, draw.updateLine(array.get(kzDnLoLn, i), dT, dL, x2l, dL, kzCol, lineWidthIn, styleMain))
-            addLevelLabel(lblIdx, lblP, lblT, lblC, dL, kzNm + " L", kzCol)
+            cset.add(dL, kzNm + " L", kzCol, int(na), " + ", 0)
         else
             array.set(kzDnLoLn, i, draw.clearLine(array.get(kzDnLoLn, i)))
 
@@ -922,7 +896,7 @@ if barstate.islast
             color opCol = array.get(opColArr, i)
             int x2 = array.get(opMit, i) ? array.get(opMitT, i) : lineEnd
             array.set(opLnArr, i, draw.updateLine(array.get(opLnArr, i), oT, oP, x2, oP, opCol, lineWidthIn, styleOpen))
-            addLevelLabel(lblIdx, lblP, lblT, lblC, oP, srcName + " " + array.get(opTxtArr, i), opCol)
+            cset.add(oP, srcName + " " + array.get(opTxtArr, i), opCol, int(na), " + ", 0)
         else
             array.set(opLnArr, i, draw.clearLine(array.get(opLnArr, i)))
 
@@ -941,11 +915,11 @@ if barstate.islast
         if drawOk and array.get(dwmOnArr, i) and not na(pH) and not na(pL) and not na(pT)
             array.set(dwmHiLn, i, draw.updateLine(array.get(dwmHiLn, i), pT, pH, lineEnd, pH, dwCol, lineWidthIn, styleDwm))
             array.set(dwmLoLn, i, draw.updateLine(array.get(dwmLoLn, i), pT, pL, lineEnd, pL, dwCol, lineWidthIn, styleDwm))
-            addLevelLabel(lblIdx, lblP, lblT, lblC, pH, srcName + " " + dwNm + "H", dwCol)
-            addLevelLabel(lblIdx, lblP, lblT, lblC, pL, srcName + " " + dwNm + "L", dwCol)
+            cset.add(pH, srcName + " " + dwNm + "H", dwCol, int(na), " + ", 0)
+            cset.add(pL, srcName + " " + dwNm + "L", dwCol, int(na), " + ", 0)
             if dwmMids
                 array.set(dwmMidLn, i, draw.updateLine(array.get(dwmMidLn, i), pT, pM, lineEnd, pM, dwCol, lineWidthIn, line.style_dotted))
-                addLevelLabel(lblIdx, lblP, lblT, lblC, pM, srcName + " " + dwNm + "M", dwCol)
+                cset.add(pM, srcName + " " + dwNm + "M", dwCol, int(na), " + ", 0)
             else
                 array.set(dwmMidLn, i, draw.clearLine(array.get(dwmMidLn, i)))
         else
@@ -974,17 +948,17 @@ if barstate.islast
                 color bxCol   = fll ? color.new(baseCol, math.min(100, math.round(color.t(baseCol)) + 10)) : baseCol
                 int x2 = fll ? array.get(gapFillTArr, j) : lineEnd
                 array.set(gapBxArr, j, draw.updateBox(array.get(gapBxArr, j), array.get(gapStartArr, j), math.max(eA, eB), x2, math.min(eA, eB), bxCol, color.new(bxCol, 100)))
-                addLevelLabel(lblIdx, lblP, lblT, lblC, math.round_to_mintick(math.avg(eA, eB)), "SPY Gap " + (gapUp ? "▲" : "▼") + " " + str.tostring(math.abs(gsz), "#.##"), color.new(baseCol, 40))
+                cset.add(math.round_to_mintick(math.avg(eA, eB)), "SPY Gap " + (gapUp ? "▲" : "▼") + " " + str.tostring(math.abs(gsz), "#.##"), color.new(baseCol, 40), int(na), " + ", 0)
         if not showBx
             array.set(gapBxArr, j, draw.clearBox(array.get(gapBxArr, j)))
 
     // ---- Flush consolidated labels through the pool. One label per rounded
     // price, price printed once at the end of the merged text.
-    int nLbl = array.size(lblP)
+    int nLbl = array.size(cset.prices)
     if nLbl > 0
         for i = 0 to nLbl - 1
-            float p = array.get(lblP, i)
-            lblPool.acquire(lineEnd, p, array.get(lblT, i) + " " + str.tostring(p, format.mintick), false, array.get(lblC, i), color.white, lblSz)
+            float p = array.get(cset.prices, i)
+            lblPool.acquire(lineEnd, p, array.get(cset.texts, i) + " " + str.tostring(p, format.mintick), false, array.get(cset.colors, i), color.white, lblSz)
 
     // ---- Info table.
     table.clear(infoTable, 0, 0, 0, 2)
