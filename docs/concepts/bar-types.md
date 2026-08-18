@@ -86,6 +86,8 @@ Every classification above is a rendering of one four-field tuple — this is th
 | `failed` | true / false | `F` prefix | `F` prefix (`is_failed`) |
 | `live` | forming / closed | last combo slot; `*` when unconfirmed | `provisional` |
 
+The `>`/`<` rendering is now formally specified as **glyph notation** (`grammar/SPEC.md`): the token never carries sign — `1`, `2u`, `F2d`, `3` — and `>`/`<` carry close-versus-open exclusively, so a red 2u is `2u<`. The StratGrammar library exports both projections (`notation()` for chart convention, `display()` for glyph), and the Suite's own classification is that library since v3.1.0.
+
 Rule of thumb: **the tuple is the truth; notations are projections.** When two displays seem to disagree, resolve them back to the tuple before assuming a bug.
 
 ---

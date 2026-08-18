@@ -1,0 +1,254 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+// If a copy of the MPL was not distributed with this file, You can obtain one at
+// https://mozilla.org/MPL/2.0/.
+//
+// StratGrammar - the Strat's price action states, defined once
+// The Pine implementation of the Strat Grammar (SPEC.md in this folder). The same
+// definitions ship as a Python reference implementation with a differential test
+// against TheStrat Suite, so all three cannot quietly disagree.
+
+//@version=6
+
+// @description Classification primitives for TheStrat: reduce any candle to the
+// four-field state every notation projects from (structure, above-open, failed, live),
+// then render it either as chart notation (2u, F2d, 1u - the u/d overload traders know)
+// or as glyph notation (2u<, F2d>, 1>) where the token never carries sign and > / <
+// carry close-versus-open exclusively. Includes hammer/shooter proportion patterns and
+// Full Timeframe Continuity. Definitions only: nothing here decides what to trade.
+library("StratGrammar", overlay = true)
+
+// ============================================================================
+// THE MODEL
+// ============================================================================
+// Every candle reduces to one tuple. Everything on a chart is a projection of it.
+// structure and aboveOpen are orthogonal: a 2u can close red. That is why failed
+// exists as its own field instead of being inferred from color.
+
+// @type The four-field state every notation projects from.
+// @field structure "1", "2u", "2d" or "3" - what this candle did to the prior range. The u/d here is the BREAK SIDE, never the sign.
+// @field aboveOpen Close strictly above open. A close at the open is not above; it buckets down.
+// @field failed A directional break got rejected. Only 2u/2d can fail.
+// @field live The candle is still forming.
+export type BarState
+    string structure
+    bool aboveOpen
+    bool failed
+    bool live
+
+// ============================================================================
+// CLASSIFICATION
+// ============================================================================
+
+// @function The sign channel: did a candle close above its own open?
+// @param o Open.
+// @param c Close.
+// @returns true only for a strictly higher close. A doji buckets down.
+export aboveOpen(float o, float c) =>
+    c > o
+
+// @function Classify a candle against the prior candle's range.
+// Equal is not a break: a high exactly matching the prior high has not crossed it.
+// Gaps get no special case - classification tests the range, never the open, so a
+// gap-up open above the prior high is already at least a 2u.
+// @param prevH Prior candle high.
+// @param prevL Prior candle low.
+// @param h Current candle high.
+// @param l Current candle low.
+// @returns "1", "2u", "2d" or "3". Empty string on invalid input (na, or high below low).
+export structureOf(float prevH, float prevL, float h, float l) =>
+    if na(prevH) or na(prevL) or na(h) or na(l) or h < l or prevH < prevL
+        ""
+    else
+        brokeHigh = h > prevH
+        brokeLow = l < prevL
+        brokeHigh and brokeLow ? "3" : brokeHigh ? "2u" : brokeLow ? "2d" : "1"
+
+// @function Did a directional break get rejected? Only 2u/2d can fail: an inside bar
+// broke nothing and an outside bar broke both sides, so neither has one break to reject.
+// @param prevH Prior candle high.
+// @param prevL Prior candle low.
+// @param o Current candle open.
+// @param c Current candle close.
+// @param structure The structure from structureOf().
+// @param method "Reclaim", "Open", "Reclaim + Open" or "Reclaim OR Open" - the same option strings TheStrat Suite exposes, so an indicator can pass its input through. Reclaim: closed back inside the prior range. Open: closed against the break direction.
+// @returns true when the break was rejected under the chosen method.
+export isFailed(float prevH, float prevL, float o, float c, string structure, string method) =>
+    if structure != "2u" and structure != "2d"
+        false
+    else
+        reclaimed = c <= prevH and c >= prevL
+        againstOpen = structure == "2u" ? not aboveOpen(o, c) : aboveOpen(o, c)
+        switch method
+            "Reclaim" => reclaimed
+            "Open" => againstOpen
+            "Reclaim + Open" => reclaimed and againstOpen
+            "Reclaim OR Open" => reclaimed or againstOpen
+            => reclaimed
+
+// @function Reduce a candle to its BarState in one call.
+// @param prevH Prior candle high.
+// @param prevL Prior candle low.
+// @param o Current open.
+// @param h Current high.
+// @param l Current low.
+// @param c Current close.
+// @param method Failed-break method, as in isFailed(). Pass "Reclaim" if unsure.
+// @param live Is the candle still forming.
+// @returns A BarState, or na when the inputs do not classify.
+export classify(float prevH, float prevL, float o, float h, float l, float c, string method, bool live) =>
+    s = structureOf(prevH, prevL, h, l)
+    BarState result = na
+    if s != ""
+        result := BarState.new(s, aboveOpen(o, c), isFailed(prevH, prevL, o, c, s, method), live)
+    result
+
+// ============================================================================
+// PROJECTIONS
+// ============================================================================
+// Two renderings of the same state. Chart notation is the community convention,
+// where u/d means the break side on a 2 but close-vs-open on a 1 or 3 - the single
+// most misread thing in the notation. Glyph notation removes the overload: the token
+// never carries sign, and > / < carry close-versus-open exclusively.
+
+// @function Chart-convention token: 1u, 2d, F2u, 3d. The u/d overload lives here, at
+// the display boundary, and nowhere else.
+// @param this The state.
+// @returns The token, for example "F2u" or "1d". Empty string for na.
+export method notation(BarState this) =>
+    if na(this)
+        ""
+    else if this.structure == "1"
+        this.aboveOpen ? "1u" : "1d"
+    else if this.structure == "3"
+        this.aboveOpen ? "3u" : "3d"
+    else
+        (this.failed ? "F" : "") + this.structure
+
+// @function The sign glyph: ">" when the close is above the open, "<" otherwise.
+// @param above The aboveOpen flag.
+// @returns ">" or "<".
+export signGlyph(bool above) =>
+    above ? ">" : "<"
+
+// @function Glyph-convention token: structure with no sign, then > or <. A red 2u is
+// "2u<" - break side and sign visibly separate. Matches priceactionapi's display field.
+// @param this The state.
+// @returns For example "F2u<", "1>", "3<". Empty string for na.
+export method display(BarState this) =>
+    if na(this)
+        ""
+    else
+        base = this.structure == "2u" or this.structure == "2d" ? (this.failed ? "F" : "") + this.structure : this.structure
+        base + signGlyph(this.aboveOpen)
+
+// @function Join state tokens into a combo, oldest to newest. The last token is the
+// forming candle - position is what carries liveness, which is why notation is
+// tense-free.
+// @param tokens Tokens oldest to newest, from notation() or display().
+// @param sep Separator, usually "-" or "".
+// @param potential Prefix with "*" for a setup that has not triggered.
+// @returns The combo string, for example "*2d-1-2u".
+export combo(array<string> tokens, string sep, bool potential) =>
+    body = array.join(tokens, sep)
+    potential ? "*" + body : body
+
+// ============================================================================
+// PROPORTION PATTERNS
+// ============================================================================
+// Hammers and shooters are not structures. They describe where the body sits inside
+// the range and layer on top of any structure.
+
+// @function A candle that rejected its low.
+// @param o Open.
+// @param h High.
+// @param l Low.
+// @param c Close.
+// @param method "Broad (Loose)", "Classic" or "Pin Bar (Strict)" - TheStrat Suite's option strings. Broad: open and close both strictly above the midpoint (a body centered exactly at the midpoint is neither pattern). Classic: small body, long rejection wick. Pin Bar: body confined to the top quarter.
+// @param requireColor Additionally require a close above the open.
+// @returns true when the candle qualifies.
+export isHammer(float o, float h, float l, float c, string method, bool requireColor) =>
+    r = h - l
+    if r == 0 or na(r)
+        false
+    else if requireColor and not aboveOpen(o, c)
+        false
+    else
+        openFromLow = (o - l) / r
+        closeFromLow = (c - l) / r
+        switch method
+            "Classic" =>
+                body = math.abs(c - o)
+                bodyPct = body / r
+                wickRatio = bodyPct > 0.001 ? (math.min(o, c) - l) / body : 0
+                upperWickPct = (h - math.max(o, c)) / r
+                bodyCenterFromHigh = (h - (o + c) / 2) / r
+                closeFromHigh = (h - c) / r
+                bodyPct <= 0.30 and wickRatio >= 3.0 and upperWickPct <= 0.35 and bodyCenterFromHigh <= 0.33 and closeFromHigh <= 0.25
+            "Pin Bar (Strict)" => (h - c) / r <= 0.25 and (h - o) / r <= 0.25
+            => openFromLow > 0.50 and closeFromLow > 0.50  // Broad (Loose); strict > so a centered doji is neither
+
+// @function A candle that rejected its high. Mirror of isHammer.
+// @param o Open.
+// @param h High.
+// @param l Low.
+// @param c Close.
+// @param method As in isHammer.
+// @param requireColor Additionally require a close below the open.
+// @returns true when the candle qualifies.
+export isShooter(float o, float h, float l, float c, string method, bool requireColor) =>
+    r = h - l
+    if r == 0 or na(r)
+        false
+    else if requireColor and aboveOpen(o, c)
+        false
+    else
+        openFromLow = (o - l) / r
+        closeFromLow = (c - l) / r
+        switch method
+            "Classic" =>
+                body = math.abs(c - o)
+                bodyPct = body / r
+                wickRatio = bodyPct > 0.001 ? (h - math.max(o, c)) / body : 0
+                lowerWickPct = (math.min(o, c) - l) / r
+                bodyCenterFromLow = ((o + c) / 2 - l) / r
+                bodyPct <= 0.30 and wickRatio >= 3.0 and lowerWickPct <= 0.35 and bodyCenterFromLow <= 0.33 and closeFromLow <= 0.25
+            "Pin Bar (Strict)" => (c - l) / r <= 0.25 and (o - l) / r <= 0.25
+            => openFromLow < 0.50 and closeFromLow < 0.50  // Broad (Loose); strict < (see isHammer)
+
+// ============================================================================
+// FULL TIMEFRAME CONTINUITY
+// ============================================================================
+
+// @function Read continuity across timeframes, from the sign channel only. Do not
+// reconstruct this from structure tokens: a 2u can close red. Pass the aboveOpen of
+// each monitored timeframe's current candle, all sampled at the same moment.
+// @param signs One aboveOpen per monitored timeframe.
+// @returns "Up" when every sign is true, "Down" when every sign is false, else "Conflict". An empty array is "Conflict".
+export continuity(array<bool> signs) =>
+    n = array.size(signs)
+    if n == 0
+        "Conflict"
+    else
+        allUp = true
+        allDown = true
+        for i = 0 to n - 1
+            if array.get(signs, i)
+                allDown := false
+            else
+                allUp := false
+        allUp ? "Up" : allDown ? "Down" : "Conflict"
+
+// ============================================================================
+// DEMO - classifies the chart's own bars, both notations side by side
+// ============================================================================
+var table demo = table.new(position.top_right, 3, 2, bgcolor = color.new(color.black, 20), frame_color = color.gray, frame_width = 1)
+
+if barstate.islast
+    prior = classify(high[2], low[2], open[1], high[1], low[1], close[1], "Reclaim", false)
+    current = classify(high[1], low[1], open, high, low, close, "Reclaim", true)
+    table.cell(demo, 0, 0, "", text_color = color.gray, text_size = size.small)
+    table.cell(demo, 1, 0, "chart", text_color = color.gray, text_size = size.small)
+    table.cell(demo, 2, 0, "glyph", text_color = color.gray, text_size = size.small)
+    table.cell(demo, 0, 1, "C1 / CC", text_color = color.white, text_size = size.small)
+    table.cell(demo, 1, 1, prior.notation() + " / " + current.notation(), text_color = color.white, text_size = size.small)
+    table.cell(demo, 2, 1, prior.display() + " / " + current.display(), text_color = color.aqua, text_size = size.small)

@@ -22,8 +22,11 @@ Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 
 ### `pine/` — indicator source (newest first)
 
-- **`TheStratSuite_v3.0.1.pine`** — current build. TABLE-COMPACT-COLOR-1 (Compact table cells
-  colored by signal state or per-timeframe continuity).
+- **`TheStratSuite_v3.1.0.pine`** — current build. GRAMMAR-LIB-1 (classification delegated to
+  the StratGrammar library), CONT22-PRIOR-1 (2-2 continuations no longer blocked by a prior
+  outside bar), DEBUG-TERMS-1 (debug panel shows every in-force term).
+- `TheStratSuite_v3.0.1.pine` — TABLE-COMPACT-COLOR-1 (Compact table cells colored by signal
+  state or per-timeframe continuity), LEAD-TABLE-1, abbreviated Universal labels.
 - `TheStratSuite_v3.0.0.pine` — the first open-source publication on TradingView. BARCOLOR-1
   (bar coloring by Strat classification or FTFC) and STOP-SMALLEST-1 (Smallest Timeframe Only
   stop display).
@@ -47,6 +50,8 @@ the definition; `strat_grammar/` is a dependency-free Python reference implement
 `tests/test_pine_parity.py` transcribes `detectBarTypeAndFailed` from the shipped Pine and
 compares the two across 40,000 random bars in both detection methods, so the spec can't
 drift from the indicator.
+`StratGrammar.pine` is the same grammar as a TradingView library; the Suite imports it as of
+v3.1.0 (`import SpinTrades/StratGrammar/1`). Published versions: `PUBLISHED.md`.
 
 ### `pine-draw/` — drawing components (Pine v6)
 

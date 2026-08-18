@@ -66,6 +66,16 @@ The suffix `u`/`d` in conventional notation means two different things depending
 
 This overload is the single most common misreading of Strat notation. Keep the two channels separate internally and render the convention only at display time.
 
+### The two projections
+
+Because of that overload, this grammar defines two renderings of the same state. Both are normative; an implementation may emit either, but must name which one it is emitting.
+
+**Chart notation** is the community convention above: `1u`, `2d`, `F2u`, `3d`. The u/d overload lives at this display boundary and nowhere else.
+
+**Glyph notation** removes the overload. The token never carries sign — `1`, `2u`, `2d`, `F2u`, `F2d`, `3` — where u/d on a 2 is the break side, part of structure. The sign channel is rendered exclusively as a suffix: `>` for close above open, `<` otherwise. So a red 2u is `2u<`: break side and sign visibly separate. Examples: `1>`, `F2u<`, `3<`.
+
+Glyph notation is what programmatic surfaces should emit, and it is the `display` form priceactionapi serves. The two projections are always translatable through the tuple, never directly through each other's strings.
+
 ---
 
 ## 4. Failed (Failing 2 / Range Reclaim)
@@ -124,6 +134,8 @@ Let `range = high - low`, `body = abs(close - open)`. A zero range candle is nei
 | `PIN_BAR` | open and close both within the top 25% of the range | open and close both within the bottom 25% |
 
 `BROAD` is the reference default. A body centered exactly at the midpoint is neither pattern, under any method.
+
+Under `CLASSIC`, a body below 0.1% of the range does not qualify: the wick-to-body ratio needs a real body, so a doji is never a classic hammer or shooter.
 
 An optional color filter additionally requires a hammer to close above its open and a shooter to close below.
 

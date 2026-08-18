@@ -43,7 +43,10 @@ def is_hammer(c: Candle, method: PatternMethod = PatternMethod.BROAD,
         return low_frac_open >= 0.75 and low_frac_close >= 0.75
     if method is PatternMethod.CLASSIC:
         body_pct, upper_pct, _lower_pct, center_from_high, close_from_high = _fractions(c)
-        wick_ratio = (min(c.open, c.close) - c.low) / c.body if c.body > 0 else float("inf")
+        # A near-zero body does not qualify: the ratio test needs a real body.
+        # Matches the reference implementation (bodyPct > 0.001, else ratio 0).
+        body_pct2 = c.body / c.range
+        wick_ratio = (min(c.open, c.close) - c.low) / c.body if body_pct2 > 0.001 else 0.0
         return (
             body_pct <= 0.30
             and wick_ratio >= 3.0
@@ -71,7 +74,8 @@ def is_shooter(c: Candle, method: PatternMethod = PatternMethod.BROAD,
         return low_frac_open <= 0.25 and low_frac_close <= 0.25
     if method is PatternMethod.CLASSIC:
         body_pct, _upper_pct, lower_pct, _center_from_high, _close_from_high = _fractions(c)
-        wick_ratio = (c.high - max(c.open, c.close)) / c.body if c.body > 0 else float("inf")
+        body_pct2 = c.body / c.range
+        wick_ratio = (c.high - max(c.open, c.close)) / c.body if body_pct2 > 0.001 else 0.0
         center_from_low = ((c.open + c.close) / 2 - c.low) / c.range
         close_from_low = (c.close - c.low) / c.range
         return (

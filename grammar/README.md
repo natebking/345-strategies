@@ -16,6 +16,10 @@ This package answers those in one place, then proves the answers against a worki
 
 That last part is the point. A specification that disagrees with a shipped implementation is documentation, not a specification.
 
+## The Pine implementation
+
+`StratGrammar.pine` is the same grammar as a TradingView library (`import SpinTrades/StratGrammar/1`). It exports the `BarState` type, `classify`, both notation projections (`notation()` chart-convention, `display()` glyph-convention with `>`/`<`), the hammer/shooter methods, and `continuity` — with the Suite's exact settings strings accepted as method arguments so an indicator can pass its inputs straight through. TheStrat Suite itself imports it as of v3.1.0. Published versions are recorded in the repo root `PUBLISHED.md`.
+
 ## Install
 
 ```bash

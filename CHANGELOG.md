@@ -8,6 +8,22 @@ How to read this file:
 - **Every fix cites its `FIX` tag.** Grep the current source for the tag to find the exact code and the full inline rationale. Code references are function names and tags, never line numbers.
 - **Dates** come from dated `FIX` comments and file names. Where a snapshot carries no date of its own (2.2.2), the newest dated comment introduced in it is used.
 
+## [3.1.0] — 2026-08-18
+
+Requires the StratGrammar library (TV version 1) to be published before this compiles.
+
+### Fixed
+
+- **2-2 Continuations no longer go missing when the bar before C1 was an outside bar.** The pattern is C1 and CC — two directional bars in the same direction — so nothing further back should gate it. If I want a three-bar combination I'll say so by specifying C2, the way 3-2 Expansions do. The old rule dropped every 2-2 continuation in a `3 → 2u → 2u` sequence on the grounds that the trend was one bar old, which silently cost real setups: no level, no label, no alert, and a dark cell in the data table with nothing anywhere to say why. Removed from both the in-force test and the two draw branches, and the now-unused parameter is gone from `shouldDrawC1Level` and its two wrappers. Magnitude behavior is unchanged — `shouldDrawMagnitude` already suppresses on `c1_broke_c2`, which is true for every 2-2 continuation regardless of what preceded it. `c2_was_3` stays in the debug panel as diagnostic information. (`CONT22-PRIOR-1`)
+
+### Changed
+
+- **Classification now comes from the StratGrammar library** (`import SpinTrades/StratGrammar/1`) — the same definitions published as `grammar/SPEC.md` and the Python reference implementation. `detectBarTypeAndFailed`, `calcBarType`, `calcBarNum`, `detectPatterns` and `calculateFTFC` are thin wrappers with unchanged signatures; no call site and no behavior changed (60,000-bar differential against the old inline logic across all four Failing 2 methods: zero mismatches, plus 180,000 pattern checks). The `CandleMetrics` type and six pattern detectors moved into the library. One quirk preserved deliberately: `calculateFTFC` with zero qualifying timeframes still returns both flags true, exactly as the old accumulator did. Not a performance change in either direction — classification was never the hot path. (`GRAMMAR-LIB-1`)
+
+- The **debug panel now shows why a signal is or isn't in force**, not just what the bars are. It reads as two panes: the left one keeps the bar classification (C1, CC, patterns, Failing 2s) and adds a **C2 Bar Type** section — `c2_was_2u` / `c2_was_2d` / `c2_was_3` / `c2_closed_up` / `c2_closed_down`. C2 was invisible before, which mattered because a 2-2 continuation is silently blocked whenever C2 is an outside bar, with no toggle and nothing on screen to say so. The right pane is new: `sif_high` / `sif_low` as the data table actually reads them, then one row per in-force term (Inside Rev, Inside Cont, Ham/Sho, 2-2 Rev, 2-2 Cont, 3-2 Exp, Failing 2) reported high-side / low-side, then the gates (`hammer_shows`, `shooter_shows`, FTFC), the draw decisions, and magnitude. Twelve fields the panel already collected but never displayed are now on screen.
+
+  The seven terms behind `signal_in_force_high` / `signal_in_force_low` are named variables rather than one inlined expression, and the panel reports those same booleans — so it cannot drift out of sync with the signal the way a re-derived copy would. `DebugInfo` fields carry defaults, replacing a 32-argument positional constructor, and three row helpers replace the table cell pairs the panel used to spell out one line at a time. No signal, level, label or alert behavior changes. (`DEBUG-TERMS-1`)
+
 ## [3.0.1] — 2026-08-03
 
 ### Fixed

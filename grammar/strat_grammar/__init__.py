@@ -19,7 +19,7 @@ Structure and sign are orthogonal. A 2u can close red; that is what `failed`
 is for. See SPEC.md for the definitions this implements.
 """
 
-from .model import Candle, Structure, State, FailedMethod, PatternMethod, Continuity
+from .model import Candle, Structure, State, FailedMethod, PatternMethod, Continuity, sign_glyph
 from .classify import classify, structure_of, is_failed
 from .patterns import is_hammer, is_shooter
 from .continuity import continuity
@@ -41,4 +41,5 @@ __all__ = [
     "is_shooter",
     "continuity",
     "combo",
+    "sign_glyph",
 ]

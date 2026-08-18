@@ -100,6 +100,19 @@ class State:
                 token = f"F{token}"
         return token
 
+    def display(self) -> str:
+        """Glyph-notation token: the structure with no sign, then '>' or '<'.
+
+        The token never carries sign in this projection, so a red 2u renders as
+        '2u<' with break side and sign visibly separate. This is the form
+        programmatic surfaces should emit (and the form priceactionapi serves).
+        """
+        if self.structure in (Structure.TWO_UP, Structure.TWO_DOWN):
+            base = ("F" if self.failed else "") + self.structure.value
+        else:
+            base = self.structure.value
+        return base + sign_glyph(self.above_open)
+
     def as_dict(self) -> dict:
         return {
             "structure": self.structure.value,
@@ -107,3 +120,8 @@ class State:
             "failed": self.failed,
             "live": self.live,
         }
+
+
+def sign_glyph(above_open: bool) -> str:
+    """'>' when the close is above the open, '<' otherwise."""
+    return ">" if above_open else "<"

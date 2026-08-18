@@ -122,7 +122,7 @@ Reversal signals fire when the current bar (CC) breaks the prior bar's range in 
 
 ## Signals - Continuations
 
-Continuation signals fire when CC breaks the prior range in the same direction as the preceding move. They are trend-following setups. Filters work the same way as on the reversal panel and are off by default. 2-2 Continuation setups where C2 was an outside bar are excluded - the "trend" was one bar old.
+Continuation signals fire when CC breaks the prior range in the same direction as the preceding move. They are trend-following setups. Filters work the same way as on the reversal panel and are off by default. A 2-2 Continuation is read from C1 and CC only - whatever came before C1 does not gate it.
 
 - **Inside Continuations** (default: on | options: on / off) - Detects the C1-inside continuation, where C1 is an inside bar and CC breaks in the same direction as C2, for example 2u-1-2u. Price paused to consolidate and then continued the prior move, a trend continuation with a built-in pullback. On by default. Has HAM/SHO and FTFC filters.
 - **HAM/SHO** (default: off) - Per-signal momentum filter for Inside Continuations. Requires C1 (the inside bar) to be a hammer or shooter, adding conviction from a tested-and-rejected side. Uses the global Hammer/Shooter Detection definition.

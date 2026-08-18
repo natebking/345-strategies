@@ -145,3 +145,31 @@ def test_mixed_is_conflict():
 
 def test_empty_is_conflict():
     assert continuity([]) is Continuity.CONFLICT
+
+
+# --- glyph projection ------------------------------------------------------
+
+def test_glyph_token_never_carries_sign_on_ones_and_threes():
+    assert classify(Candle(101, 109, 91, 108), PRIOR).display() == "1>"
+    assert classify(Candle(108, 109, 91, 101), PRIOR).display() == "1<"
+    assert classify(Candle(105, 115, 85, 112), PRIOR).display() == "3>"
+
+def test_glyph_makes_the_red_two_up_visible():
+    """The whole point: break side and sign visibly separate."""
+    state = classify(Candle(114, 115, 95, 112), PRIOR)   # broke high, closed red, held above the prior high
+    assert state.display() == "2u<"
+
+def test_glyph_failed_keeps_break_side():
+    state = classify(Candle(105, 115, 95, 101), PRIOR)   # F2u closing red
+    assert state.display() == "F2u<"
+
+def test_projections_agree_through_the_tuple():
+    """Chart and glyph forms of one state always describe the same tuple."""
+    state = classify(Candle(114, 115, 95, 112), PRIOR)
+    assert state.notation() == "2u" and state.display() == "2u<"
+
+
+def test_classic_rejects_a_doji_regardless_of_wick():
+    """A near-zero body fails Classic: the ratio test needs a real body."""
+    doji_long_wick = Candle(open=109.99, high=110, low=90, close=110)
+    assert is_hammer(doji_long_wick, PatternMethod.CLASSIC) is False
