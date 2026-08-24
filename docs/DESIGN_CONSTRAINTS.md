@@ -37,8 +37,13 @@ the stated intent.
 11. Alert tradeoffs accepted: freq_once_per_bar consolidation; re-trigger when a
     signal goes out-of-force and back in on a new bar; per-TF alertconditions
     read pre-loop snapshots (this fixed a real bug - do not undo).
-12. Label overlap is a known platform limitation, sidelined. Do not propose
-    collision systems.
+12. Label overlap at *distinct* prices is a TradingView rendering limitation and
+    stays sidelined: two levels a fraction of a point apart occupy the same pixel
+    row and there is nothing Pine can do, because Pine cannot measure pixels. Do
+    not propose collision systems for that case. Labels at the *same* price are a
+    different matter and are solved - PineDraw's `LabelSet` consolidates them into
+    one row, with a caller-chosen tolerance. (Updated 2026-08-18; the original
+    blanket instruction predates PineDraw.)
 13. Preview-mode auto incorrectly shows in bar replay - known TradingView
     limitation, tooltip workaround accepted. Do not re-report.
 14. Emoji (green/red circles) in alert text and arrows/diamond in Universal labels are an
