@@ -3,9 +3,9 @@
 // https://mozilla.org/MPL/2.0/.
 //
 // TheStratGrammar - the Strat's price action states, defined once
-// The Pine implementation of TheStrat Grammar (SPEC.md in this folder). The same
-// definitions ship as a Python reference implementation with a differential test
-// against TheStrat Suite, so all three cannot quietly disagree.
+// The Pine implementation of a written specification. The same definitions also ship
+// as a reference implementation in another language, with differential tests between
+// them, so the two cannot quietly disagree about what a candle is.
 
 //@version=6
 
@@ -70,7 +70,7 @@ export structureOf(float prevH, float prevL, float h, float l) =>
 // @param o Current candle open.
 // @param c Current candle close.
 // @param structure The structure from structureOf().
-// @param method "Reclaim", "Open", "Reclaim + Open" or "Reclaim OR Open" - the same option strings TheStrat Suite exposes, so an indicator can pass its input through. Reclaim: closed back inside the prior range. Open: closed against the break direction.
+// @param method "Reclaim", "Open", "Reclaim + Open" or "Reclaim OR Open" - these are the conventional option names, so an indicator can pass a settings input straight through. Reclaim: closed back inside the prior range. Open: closed against the break direction.
 // @returns true when the break was rejected under the chosen method.
 export isFailed(float prevH, float prevL, float o, float c, string structure, string method) =>
     if structure != "2u" and structure != "2d"
@@ -163,7 +163,7 @@ export combo(array<string> tokens, string sep, bool potential) =>
 // @param h High.
 // @param l Low.
 // @param c Close.
-// @param method "Broad (Loose)", "Classic" or "Pin Bar (Strict)" - TheStrat Suite's option strings. Broad: open and close both strictly above the midpoint (a body centered exactly at the midpoint is neither pattern). Classic: small body, long rejection wick. Pin Bar: body confined to the top quarter.
+// @param method "Broad (Loose)", "Classic" or "Pin Bar (Strict)" - the conventional option names. Broad: open and close both strictly above the midpoint (a body centered exactly at the midpoint is neither pattern). Classic: small body, long rejection wick. Pin Bar: body confined to the top quarter.
 // @param requireColor Additionally require a close above the open.
 // @returns true when the candle qualifies.
 export isHammer(float o, float h, float l, float c, string method, bool requireColor) =>
@@ -253,9 +253,8 @@ demoGlyph   = input.bool(true,  "Label with glyph notation (2u<)", group = grpDe
 demoMethod  = input.string("Reclaim", "Failing 2 method", options = ["Reclaim", "Open", "Reclaim + Open", "Reclaim OR Open"], group = grpDemo)
 demoPattern = input.string("Broad (Loose)", "Hammer / shooter", options = ["Broad (Loose)", "Classic", "Pin Bar (Strict)"], group = grpDemo)
 
-// Color by the chart-notation token, using TheStrat Suite's palette so the library
-// and the indicator read the same on a chart. The token already encodes structure,
-// sign and failed, so one switch covers every state.
+// Color by the chart-notation token. The token already encodes structure, sign and
+// failed, so one switch covers every state.
 demoColor(string tok) =>
     switch tok
         "1u"  => #ffeb3b
