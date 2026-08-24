@@ -11,7 +11,7 @@ import random
 
 import pytest
 
-from strat_grammar import Candle, FailedMethod, classify
+from thestrat_grammar import Candle, FailedMethod, classify
 
 
 def pine_detect(prevH, prevL, currH, currL, currO, currC, method="Reclaim"):

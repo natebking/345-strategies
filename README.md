@@ -46,7 +46,7 @@ Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 
 Technical definitions of the price action states themselves: the four-field model every
 candle reduces to, and the edge cases that make two implementations disagree. `SPEC.md` is
-the definition; `strat_grammar/` is a dependency-free Python reference implementation.
+the definition; `thestrat_grammar/` is a dependency-free Python reference implementation.
 `tests/test_pine_parity.py` transcribes `detectBarTypeAndFailed` from the shipped Pine and
 compares the two across 40,000 random bars in both detection methods, so the spec can't
 drift from the indicator.

@@ -2,7 +2,7 @@
 
 The whole model is one tuple per candle. Everything else is a projection of it:
 
-    >>> from strat_grammar import Candle, classify
+    >>> from thestrat_grammar import Candle, classify
     >>> prior = Candle(open=100, high=110, low=90, close=105)
     >>> current = Candle(open=106, high=115, low=95, close=101)
     >>> state = classify(current, prior)

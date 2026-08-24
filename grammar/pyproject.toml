@@ -1,5 +1,5 @@
 [project]
-name = "strat-grammar"
+name = "thestrat-grammar"
 version = "0.1.0"
 description = "Technical definitions of TheStrat's price action states, with a Python reference implementation"
 readme = "README.md"
@@ -16,4 +16,4 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["strat_grammar*"]
+include = ["thestrat_grammar*"]

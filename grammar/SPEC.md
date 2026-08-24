@@ -1,4 +1,4 @@
-# The Strat Grammar
+# TheStrat Grammar
 
 A precise, implementation-independent definition of the price action states used in TheStrat. If you are building a bot, labeling a dataset, or writing your own indicator, this is the layer to agree on first.
 

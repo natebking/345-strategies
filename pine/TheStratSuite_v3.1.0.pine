@@ -765,7 +765,11 @@ calculateFTFC(tf1_en, tf1_o, tf1_c, tf2_en, tf2_o, tf2_c, tf3_en, tf3_o, tf3_c, 
     // Quirk preserved from the original: with ZERO qualifying slots (all disabled or na)
     // this returns [true, true], exactly as the old accumulator did - not a state the
     // library models, and not one a preset can produce, but a refactor changes nothing.
-    signs = array.new<bool>()
+    // PERF-ALLOC-2: hoisted with var so each call site allocates once and reuses,
+    // instead of allocating a fresh array on every bar. This function runs unguarded
+    // at global scope, and again per bar when FTFC bar coloring is on.
+    var array<bool> signs = array.new<bool>()
+    array.clear(signs)
     if tf1_en and not na(tf1_c) and not na(tf1_o)
         array.push(signs, tf1_c > tf1_o)
     if tf2_en and not na(tf2_c) and not na(tf2_o)

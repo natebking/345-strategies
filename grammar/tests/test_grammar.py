@@ -6,7 +6,7 @@ disagreement between implementations. They are the point of the package.
 
 import pytest
 
-from strat_grammar import (
+from thestrat_grammar import (
     Candle, Structure, FailedMethod, PatternMethod, Continuity,
     classify, structure_of, is_failed, is_hammer, is_shooter, continuity, combo,
 )

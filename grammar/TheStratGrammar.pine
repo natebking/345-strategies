@@ -3,7 +3,7 @@
 // https://mozilla.org/MPL/2.0/.
 //
 // TheStratGrammar - the Strat's price action states, defined once
-// The Pine implementation of the Strat Grammar (SPEC.md in this folder). The same
+// The Pine implementation of TheStrat Grammar (SPEC.md in this folder). The same
 // definitions ship as a Python reference implementation with a differential test
 // against TheStrat Suite, so all three cannot quietly disagree.
 

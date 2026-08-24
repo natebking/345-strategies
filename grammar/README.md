@@ -1,4 +1,4 @@
-# Strat Grammar
+# TheStrat Grammar
 
 Technical definitions of the price action states used in TheStrat, plus a Python reference implementation that agrees with the indicator they came from.
 
@@ -11,7 +11,7 @@ The Strat is widely used and loosely specified. Most disagreements between two i
 This package answers those in one place, then proves the answers against a working implementation.
 
 - **[SPEC.md](SPEC.md)** is the definition, written to be implementable in any language.
-- **`strat_grammar/`** is the Python reference implementation.
+- **`thestrat_grammar/`** is the Python reference implementation.
 - **`tests/test_pine_parity.py`** checks it against the Pine Script running in [TheStrat Suite](../pine/) in this repo across 40,000 randomly generated bars, in both detection methods. Currently zero mismatches.
 
 That last part is the point. A specification that disagrees with a shipped implementation is documentation, not a specification.
@@ -31,7 +31,7 @@ No dependencies. Python 3.10+.
 ## Use
 
 ```python
-from strat_grammar import Candle, classify, continuity
+from thestrat_grammar import Candle, classify, continuity
 
 prior   = Candle(open=100, high=110, low=90, close=105)
 current = Candle(open=106, high=115, low=95, close=101)
