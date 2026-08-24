@@ -14,7 +14,7 @@ Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 
 ### Quick start
 
-1. Add [the indicator](https://www.tradingview.com/script/dnJOzGmk-TheStrat-Suite-Open-Source-Entries-Targets-and-Stop-Loss/) to your chart on TradingView — or copy `pine/TheStratSuite_v3.1.0.pine` into the Pine editor (it imports the StratGrammar library, published on TradingView).
+1. Add [the indicator](https://www.tradingview.com/script/dnJOzGmk-TheStrat-Suite-Open-Source-Entries-Targets-and-Stop-Loss/) to your chart on TradingView — or copy `pine/TheStratSuite_v3.1.0.pine` into the Pine editor (it imports TheStratGrammar, published on TradingView).
 2. Pick a Timeframe Preset (TheStrat Classic, Scalp, Day Trade, Futures/Crypto, Swing Trade, Investing) — or set Custom and configure the six slots yourself.
 3. Read `docs/concepts/bar-types.md` and `docs/concepts/signals.md` to learn what you're looking at.
 
@@ -23,7 +23,7 @@ Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 ### `pine/` — indicator source (newest first)
 
 - **`TheStratSuite_v3.1.0.pine`** — current build. GRAMMAR-LIB-1 (classification delegated to
-  the StratGrammar library), CONT22-PRIOR-1 (2-2 continuations no longer blocked by a prior
+  TheStratGrammar), CONT22-PRIOR-1 (2-2 continuations no longer blocked by a prior
   outside bar), DEBUG-TERMS-1 (debug panel shows every in-force term).
 - `TheStratSuite_v3.0.1.pine` — TABLE-COMPACT-COLOR-1 (Compact table cells colored by signal
   state or per-timeframe continuity), LEAD-TABLE-1, abbreviated Universal labels.
@@ -50,8 +50,8 @@ the definition; `strat_grammar/` is a dependency-free Python reference implement
 `tests/test_pine_parity.py` transcribes `detectBarTypeAndFailed` from the shipped Pine and
 compares the two across 40,000 random bars in both detection methods, so the spec can't
 drift from the indicator.
-`StratGrammar.pine` is the same grammar as a TradingView library; the Suite imports it as of
-v3.1.0 (`import SpinTrades/StratGrammar/1`). Published versions: `PUBLISHED.md`.
+`TheStratGrammar.pine` is the same grammar as a TradingView library; the Suite imports it as of
+v3.1.0 (`import SpinTrades/TheStratGrammar/1`). Published versions: `PUBLISHED.md`.
 
 ### `pine-draw/` — drawing components (Pine v6)
 

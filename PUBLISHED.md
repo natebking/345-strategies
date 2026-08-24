@@ -9,3 +9,4 @@ never auto-upgrade, so when a library updates, sweep the repo for old
 |---|---|---|---|---|---|
 | PineDraw | 1 | `SpinTrades/PineDraw/1` | 2026-08-12 | https://www.tradingview.com/script/L1Yo5Rir-PineDraw/ | `tv-PineDraw-v1` |
 | PineDraw | 2 | `SpinTrades/PineDraw/2` | 2026-08-13 | https://www.tradingview.com/script/L1Yo5Rir-PineDraw/ | `tv-PineDraw-v2` |
+| TheStratGrammar | 1 | `SpinTrades/TheStratGrammar/1` | pending | pending | `tv-TheStratGrammar-v1` |

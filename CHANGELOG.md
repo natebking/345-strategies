@@ -10,7 +10,7 @@ How to read this file:
 
 ## [3.1.0] — 2026-08-18
 
-Requires the StratGrammar library (TV version 1) to be published before this compiles.
+Requires TheStratGrammar (TV version 1) to be published before this compiles.
 
 ### Fixed
 
@@ -18,7 +18,7 @@ Requires the StratGrammar library (TV version 1) to be published before this com
 
 ### Changed
 
-- **Classification now comes from the StratGrammar library** (`import SpinTrades/StratGrammar/1`) — the same definitions published as `grammar/SPEC.md` and the Python reference implementation. `detectBarTypeAndFailed`, `calcBarType`, `calcBarNum`, `detectPatterns` and `calculateFTFC` are thin wrappers with unchanged signatures; no call site and no behavior changed (60,000-bar differential against the old inline logic across all four Failing 2 methods: zero mismatches, plus 180,000 pattern checks). The `CandleMetrics` type and six pattern detectors moved into the library. One quirk preserved deliberately: `calculateFTFC` with zero qualifying timeframes still returns both flags true, exactly as the old accumulator did. Not a performance change in either direction — classification was never the hot path. (`GRAMMAR-LIB-1`)
+- **Classification now comes from TheStratGrammar** (`import SpinTrades/TheStratGrammar/1`) — the same definitions published as `grammar/SPEC.md` and the Python reference implementation. `detectBarTypeAndFailed`, `calcBarType`, `calcBarNum`, `detectPatterns` and `calculateFTFC` are thin wrappers with unchanged signatures; no call site and no behavior changed (60,000-bar differential against the old inline logic across all four Failing 2 methods: zero mismatches, plus 180,000 pattern checks). The `CandleMetrics` type and six pattern detectors moved into the library. One quirk preserved deliberately: `calculateFTFC` with zero qualifying timeframes still returns both flags true, exactly as the old accumulator did. Not a performance change in either direction — classification was never the hot path. (`GRAMMAR-LIB-1`)
 
 - The **debug panel now shows why a signal is or isn't in force**, not just what the bars are. It reads as two panes: the left one keeps the bar classification (C1, CC, patterns, Failing 2s) and adds a **C2 Bar Type** section — `c2_was_2u` / `c2_was_2d` / `c2_was_3` / `c2_closed_up` / `c2_closed_down`. C2 was invisible before, which mattered because a 2-2 continuation is silently blocked whenever C2 is an outside bar, with no toggle and nothing on screen to say so. The right pane is new: `sif_high` / `sif_low` as the data table actually reads them, then one row per in-force term (Inside Rev, Inside Cont, Ham/Sho, 2-2 Rev, 2-2 Cont, 3-2 Exp, Failing 2) reported high-side / low-side, then the gates (`hammer_shows`, `shooter_shows`, FTFC), the draw decisions, and magnitude. Twelve fields the panel already collected but never displayed are now on screen.
 

@@ -2,7 +2,7 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 //
-// StratGrammar - the Strat's price action states, defined once
+// TheStratGrammar - the Strat's price action states, defined once
 // The Pine implementation of the Strat Grammar (SPEC.md in this folder). The same
 // definitions ship as a Python reference implementation with a differential test
 // against TheStrat Suite, so all three cannot quietly disagree.
@@ -15,7 +15,7 @@
 // or as glyph notation (2u<, F2d>, 1>) where the token never carries sign and > / <
 // carry close-versus-open exclusively. Includes hammer/shooter proportion patterns and
 // Full Timeframe Continuity. Definitions only: nothing here decides what to trade.
-library("StratGrammar", overlay = true)
+library("TheStratGrammar", overlay = true)
 
 // ============================================================================
 // THE MODEL
@@ -239,16 +239,85 @@ export continuity(array<bool> signs) =>
         allUp ? "Up" : allDown ? "Down" : "Conflict"
 
 // ============================================================================
-// DEMO - classifies the chart's own bars, both notations side by side
+// DEMO - what this library does, drawn on your chart
 // ============================================================================
-var table demo = table.new(position.top_right, 3, 2, bgcolor = color.new(color.black, 20), frame_color = color.gray, frame_width = 1)
+// Illustration only; none of it is exported. It labels recent bars with their
+// classification and breaks the current bar into the four-field state plus both
+// projections, so the difference between the two notations is visible rather than
+// described.
 
-if barstate.islast
-    prior = classify(high[2], low[2], open[1], high[1], low[1], close[1], "Reclaim", false)
-    current = classify(high[1], low[1], open, high, low, close, "Reclaim", true)
-    table.cell(demo, 0, 0, "", text_color = color.gray, text_size = size.small)
-    table.cell(demo, 1, 0, "chart", text_color = color.gray, text_size = size.small)
-    table.cell(demo, 2, 0, "glyph", text_color = color.gray, text_size = size.small)
-    table.cell(demo, 0, 1, "C1 / CC", text_color = color.white, text_size = size.small)
-    table.cell(demo, 1, 1, prior.notation() + " / " + current.notation(), text_color = color.white, text_size = size.small)
-    table.cell(demo, 2, 1, prior.display() + " / " + current.display(), text_color = color.aqua, text_size = size.small)
+grpDemo = "Demo"
+demoOn      = input.bool(true,  "Show demo",                     group = grpDemo)
+demoBars    = input.int(18,     "Bars to label", minval = 0, maxval = 40, group = grpDemo)
+demoGlyph   = input.bool(true,  "Label with glyph notation (2u<)", group = grpDemo, tooltip = "On: the token carries no sign and > / < carry close-versus-open. Off: chart convention, where u/d means the break side on a 2 but close-versus-open on a 1 or 3.")
+demoMethod  = input.string("Reclaim", "Failing 2 method", options = ["Reclaim", "Open", "Reclaim + Open", "Reclaim OR Open"], group = grpDemo)
+demoPattern = input.string("Broad (Loose)", "Hammer / shooter", options = ["Broad (Loose)", "Classic", "Pin Bar (Strict)"], group = grpDemo)
+
+// Color by the chart-notation token, using TheStrat Suite's palette so the library
+// and the indicator read the same on a chart. The token already encodes structure,
+// sign and failed, so one switch covers every state.
+demoColor(string tok) =>
+    switch tok
+        "1u"  => #ffeb3b
+        "1d"  => #ff9800
+        "2u"  => #4caf50
+        "2d"  => #f23645
+        "F2u" => #f77c80
+        "F2d" => #81c784
+        "3u"  => #089981
+        "3d"  => #e91e63
+        => color.gray
+
+// Dark fills need light text; the rest read better dark.
+demoTextColor(string tok) =>
+    tok == "2d" or tok == "3u" or tok == "3d" ? #ffffff : #101010
+
+demoState = classify(high[1], low[1], open, high, low, close, demoMethod, barstate.isrealtime)
+demoTok = na(demoState) ? "" : demoState.notation()
+demoHam = isHammer(open, high, low, close, demoPattern, false)
+demoSho = isShooter(open, high, low, close, demoPattern, false)
+demoWindow = bar_index > last_bar_index - demoBars
+
+if demoOn and demoWindow and not na(demoState)
+    label.new(bar_index, high, demoGlyph ? demoState.display() : demoTok,
+      style = label.style_label_down, color = demoColor(demoTok),
+      textcolor = demoTextColor(demoTok), size = size.small)
+
+// Gated to the same window as the labels. Ungated, Broad fires on roughly a third of
+// all bars and litters the whole chart with triangles.
+plotshape(demoOn and demoWindow and demoHam, "Hammer",  shape.triangleup,   location.belowbar, #4caf50, size = size.tiny)
+plotshape(demoOn and demoWindow and demoSho, "Shooter", shape.triangledown, location.abovebar, #f23645, size = size.tiny)
+
+// Continuity needs more than one timeframe, so the demo reads two higher ones. Only the
+// OPEN is requested: an HTF bar's open is fixed the moment that bar starts, so
+// lookahead_on reveals nothing that is not already known at this chart bar, while the
+// close-so-far of the current HTF candle is simply the live price. Requesting the close
+// with lookahead_off would hand back the PREVIOUS HTF candle whenever the last chart bar
+// is historical, which is exactly the market-closed case.
+o60 = request.security(syminfo.tickerid, "60", open, lookahead = barmerge.lookahead_on)
+oD  = request.security(syminfo.tickerid, "D",  open, lookahead = barmerge.lookahead_on)
+
+var table demo = table.new(position.top_right, 2, 8, bgcolor = #101010e6, frame_color = #4a4a4a, frame_width = 1, border_color = #2a2a2a, border_width = 1)
+
+demoRow(int r, string k, string v, color vc) =>
+    table.cell(demo, 0, r, k, text_color = #9e9e9e, text_size = size.small, text_halign = text.align_left)
+    table.cell(demo, 1, r, v, text_color = vc, text_size = size.small, text_halign = text.align_right)
+
+if demoOn and barstate.islast and not na(demoState)
+    signs = array.new<bool>()
+    array.push(signs, aboveOpen(open, close))
+    array.push(signs, aboveOpen(o60, close))
+    array.push(signs, aboveOpen(oD, close))
+    ftfc = continuity(signs)
+
+    // Both cells must exist before they can be merged.
+    table.cell(demo, 0, 0, "TheStrat Grammar", text_color = #ffffff, text_size = size.small)
+    table.cell(demo, 1, 0, "", text_color = #ffffff, text_size = size.small)
+    table.merge_cells(demo, 0, 0, 1, 0)
+    demoRow(1, "structure",  demoState.structure,                          demoColor(demoTok))
+    demoRow(2, "above open", signGlyph(demoState.aboveOpen),               demoState.aboveOpen ? #26a69a : #ef5350)
+    demoRow(3, "failed",     demoState.failed ? "yes" : "no",              demoState.failed ? #ff9800 : #9e9e9e)
+    demoRow(4, "live",       demoState.live ? "yes" : "no",                #9e9e9e)
+    demoRow(5, "chart",      demoState.notation(),                         #ffffff)
+    demoRow(6, "glyph",      demoState.display(),                          #4dd0e1)
+    demoRow(7, "continuity", ftfc + (demoHam ? "  HAM" : demoSho ? "  SHO" : ""), ftfc == "Up" ? #26a69a : ftfc == "Down" ? #ef5350 : #9e9e9e)

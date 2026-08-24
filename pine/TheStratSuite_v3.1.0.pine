@@ -35,11 +35,11 @@
 indicator("TheStrat Suite - v3.1.0", shorttitle = "TheStrat Suite", overlay = true, max_labels_count = 200, max_lines_count = 200, max_boxes_count = 200, max_bars_back = 200)
 
 // GRAMMAR-LIB-1 (2026-08-18): bar classification, hammers/shooters, and FTFC now come
-// from the StratGrammar library - one classifier, spec-tested against the Python
+// from the TheStratGrammar library - one classifier, spec-tested against the Python
 // reference and this file's previous inline logic (60k-bar differential, 0 mismatches).
 // Everything below that used to define classification is now a thin wrapper keeping the
 // original signature, so no call site changed and no behavior changed.
-import SpinTrades/StratGrammar/1 as sg
+import SpinTrades/TheStratGrammar/1 as sg
 
 // ============================================================================
 // SECTION 1: HELPER FUNCTIONS
