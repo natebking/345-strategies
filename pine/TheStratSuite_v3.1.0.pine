@@ -744,6 +744,13 @@ findExhaustionLevels() =>
                 break
     [exhHighPrice, exhHighTime, exhLowPrice, exhLowTime]
 
+// GRAMMAR-LIB-1: stays local. It sat inside the CandleMetrics block that moved into the
+// library, but the library exports no inside-bar helper - sg.structureOf() == "1" is the
+// equivalent, and routing this through it would add an na-guard branch on the path that
+// gates every Inside Reversal and Inside Continuation. Unchanged from v3.0.1.
+isInsideBar(currH, currL, prevH, prevL) =>
+    currH <= prevH and currL >= prevL
+
 calcBarType(prevH, prevL, currH, currL, currO, currC) =>
     // GRAMMAR-LIB-1: combo-token rendering of sg.structureOf - bare "1", signed 3s.
     if na(currO) or na(currC)
@@ -783,7 +790,10 @@ calculateFTFC(tf1_en, tf1_o, tf1_c, tf2_en, tf2_o, tf2_c, tf3_en, tf3_o, tf3_c, 
     if tf6_en and not na(tf6_c) and not na(tf6_o)
         array.push(signs, tf6_c > tf6_o)
     res = sg.continuity(signs)
-    array.size(signs) == 0 ? [true, true] : [res == "Up", res == "Down"]
+    if array.size(signs) == 0
+        [true, true]
+    else
+        [res == "Up", res == "Down"]
 
 // ============================================================================
 // SECTION 5: DECISION LOGIC FUNCTIONS
@@ -821,6 +831,9 @@ detectFailed2(c1_high, c1_low, cc_open, cc_close, cc_high, cc_low, method) =>
                 pre_f2d := true
     [cc_is_2u, cc_is_2d, cc_is_3, is_f2u, is_f2d, pre_f2u, pre_f2d]
 
+// FIX CONT22-PRIOR-1 (2026-08-18): `c2_was_3` removed from the parameter list - it now gates
+// nothing here. It is still computed in computeSignalState and still reported in the debug
+// panel as diagnostic information; see the two continuation branches below.
 shouldDrawC1Level(bool isBullish, c1_is_inside, c1_is_hammer, c1_is_shooter, cc_is_2u, cc_is_2d, cc_is_3, is_f2u, is_f2d, ftfc_up, ftfc_down, c1_was_2u, c1_was_2d, c1_is_3, c2_closed_up, c2_closed_down) =>
     result = false
     is_continuation = false
@@ -910,12 +923,18 @@ shouldDrawC1Level(bool isBullish, c1_is_inside, c1_is_hammer, c1_is_shooter, cc_
             result := false
         else
             result := not reversals_ftfc_blocks
+    // FIX CONT22-PRIOR-1 (2026-08-18): the `not c2_was_3` guard is gone from both 2-2
+    // continuation branches. The pattern is C1 and CC - two directional bars the same way -
+    // so nothing further back gates it; a three-bar combination would name C2 explicitly the
+    // way 3-2 Expansions do. The old guard dropped every continuation in a 3 -> 2u -> 2u
+    // sequence, costing a level, label, alert and table cell with nothing on screen to say why.
     else if c1_was_same and cc_in_force and showContinuations
         if twoTwoContOnlyMomo and not momo_pattern
             result := false
         else
             result := not continuations_ftfc_blocks
             is_continuation := result
+    // FIX CONT22-PRIOR-1: same removal, CC-inside branch.
     else if c1_was_same and cc_is_inside and showContinuations
         if twoTwoContOnlyMomo and not momo_pattern
             result := false
@@ -1294,6 +1313,8 @@ computeSignalState(data, tf, raw, showOpen, populateDebug, debugTfStr) =>
             c2_broke_c3_low = tfMagL < tfL_C3
             c2_was_2u = c2_broke_c3_high and not c2_broke_c3_low
             c2_was_2d = c2_broke_c3_low and not c2_broke_c3_high
+            // FIX CONT22-PRIOR-1: still computed, but no longer gates 2-2 continuations.
+            // Its only consumer now is the debug panel, where it stays as diagnostic context.
             c2_was_3 = c2_broke_c3_high and c2_broke_c3_low
             c2_closed_up = tfC_C2 > tfO_C2
             c2_closed_down = tfC_C2 < tfO_C2
@@ -1338,14 +1359,14 @@ computeSignalState(data, tf, raw, showOpen, populateDebug, debugTfStr) =>
             t_insideCont_h = inside_bullish and showInsideContinuations and inside_cont_high_passes_momo and cc_is_2u
             t_hamSho_h     = hammer_shows and cc_broke_high
             t_rev22_h      = showAllReversals and c1_was_2d and cc_is_2u and twotwo_rev_high_passes
-            t_cont22_h     = showContinuations and c1_was_2u and cc_is_2u and twotwo_cont_high_passes_momo
+            t_cont22_h     = showContinuations and c1_was_2u and cc_is_2u and twotwo_cont_high_passes_momo   // FIX CONT22-PRIOR-1: `and not c2_was_3` removed, matching the draw branch
             t_exp32_h      = showRangeExpansions and c1_is_3 and cc_is_2u
             t_f2_h         = show_p3_toggle and is_f2d and p3_high_passes_ftfc
             t_insideRev_l  = isInside and not c2_closed_down and cc_is_2d
             t_insideCont_l = inside_bearish and showInsideContinuations and inside_cont_low_passes_momo and cc_is_2d
             t_hamSho_l     = shooter_shows and cc_broke_low
             t_rev22_l      = showAllReversals and c1_was_2u and cc_is_2d and twotwo_rev_low_passes
-            t_cont22_l     = showContinuations and c1_was_2d and cc_is_2d and twotwo_cont_low_passes_momo
+            t_cont22_l     = showContinuations and c1_was_2d and cc_is_2d and twotwo_cont_low_passes_momo   // FIX CONT22-PRIOR-1: as t_cont22_h
             t_exp32_l      = showRangeExpansions and c1_is_3 and cc_is_2d
             t_f2_l         = show_p3_toggle and is_f2u and p3_low_passes_ftfc
             signal_in_force_high = t_insideRev_h or t_insideCont_h or t_hamSho_h or t_rev22_h or t_cont22_h or t_exp32_h or t_f2_h

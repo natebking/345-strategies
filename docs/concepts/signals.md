@@ -41,7 +41,7 @@ Bar-type notation is defined in `bar-types.md` — this doc assumes it.
 
 ### 2-2 Continuations — off for a reason
 
-Any two trending bars qualify, which is why this ships disabled. Turn it on with HAM/SHO or FTFC attached, or expect noise. Continuation setups where `C2` was an outside bar are excluded (the "trend" was one bar old).
+Any two trending bars qualify, which is why this ships disabled. Turn it on with HAM/SHO or FTFC attached, or expect noise. The pattern is `C1` and `CC` only — what happened before `C1` does not gate it, so a `3 → 2u → 2u` sequence is a valid continuation.
 
 ### Failing 2s (Range Reclaims)
 

@@ -9,4 +9,17 @@ never auto-upgrade, so when a library updates, sweep the repo for old
 |---|---|---|---|---|---|
 | PineDraw | 1 | `SpinTrades/PineDraw/1` | 2026-08-12 | https://www.tradingview.com/script/L1Yo5Rir-PineDraw/ | `tv-PineDraw-v1` |
 | PineDraw | 2 | `SpinTrades/PineDraw/2` | 2026-08-13 | https://www.tradingview.com/script/L1Yo5Rir-PineDraw/ | `tv-PineDraw-v2` |
-| TheStratGrammar | 1 | `SpinTrades/TheStratGrammar/1` | pending | pending | `tv-TheStratGrammar-v1` |
+| TheStratGrammar | 1 | `SpinTrades/TheStratGrammar/1` | 2026-08-24 | https://www.tradingview.com/script/fyVsfy8l-TheStrat-Grammar-Objective-Bar-State-Definitions-and-Notation/ | `tv-TheStratGrammar-v1` |
+
+## Notes
+
+**TheStratGrammar v1.** The publication title is
+"TheStrat Grammar: Objective Bar State Definitions and Notation" — TradingView does not tie the
+listing title to the `library()` name, so the import path stays `SpinTrades/TheStratGrammar/1`.
+
+The tag `tv-TheStratGrammar-v1` points at `c14dcc8`, not at the tip. The source was copied to the
+Pine editor before `487e89b` landed, so the published copy still carries the comment wording that
+commit replaced. TradingView generates the listing description from those comments and freezes it
+at publish time; the description was corrected by hand during the post-publish edit window, so the
+listing text matches the tip while the published *source* matches `c14dcc8`. The two reconverge at
+the next version bump — whatever ships as v2 carries the tip's comments.
