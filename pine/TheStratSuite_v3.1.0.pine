@@ -768,32 +768,51 @@ getDataWithExhaustion() =>
     [time, open, high, low, close, time[1], high[1], low[1], open[1], close[1], time[2], high[2], low[2], open[2], close[2], high[3], low[3], high[4], low[4], exhHP, exhHT, exhLP, exhLT]
 
 calculateFTFC(tf1_en, tf1_o, tf1_c, tf2_en, tf2_o, tf2_c, tf3_en, tf3_o, tf3_c, tf4_en, tf4_o, tf4_c, tf5_en, tf5_o, tf5_c, tf6_en, tf6_o, tf6_c) =>
-    // GRAMMAR-LIB-1: FTFC is sg.continuity over the qualifying slots' sign channel.
+    // PERF-FTFC-1: deliberately NOT routed through sg.continuity. This function is called
+    // unguarded at global scope - once per chart bar over all history - and again per bar
+    // when FTFC bar coloring is on. The library version costs an array clear, up to six
+    // pushes, a cross-module call, a loop, a STRING result and two string comparisons, all
+    // per bar, where this costs six boolean branches. Continuity is a six-way boolean AND
+    // reduction over the sign channel; sg.continuity remains its definition of record and
+    // the two are trivially the same. Bar CLASSIFICATION still comes from the library
+    // (sg.structureOf / sg.isFailed / sg.isHammer / sg.isShooter) - that is where a second
+    // implementation could actually drift, and it is the reason the library exists.
     // Quirk preserved from the original: with ZERO qualifying slots (all disabled or na)
-    // this returns [true, true], exactly as the old accumulator did - not a state the
-    // library models, and not one a preset can produce, but a refactor changes nothing.
-    // PERF-ALLOC-2: hoisted with var so each call site allocates once and reuses,
-    // instead of allocating a fresh array on every bar. This function runs unguarded
-    // at global scope, and again per bar when FTFC bar coloring is on.
-    var array<bool> signs = array.new<bool>()
-    array.clear(signs)
+    // this returns [true, true], matching sg.continuity's empty-array case only in shape -
+    // the library calls that "Conflict". Not a state a preset can produce.
+    ftfc_up = true
+    ftfc_down = true
     if tf1_en and not na(tf1_c) and not na(tf1_o)
-        array.push(signs, tf1_c > tf1_o)
+        if tf1_c > tf1_o
+            ftfc_down := false
+        else
+            ftfc_up := false
     if tf2_en and not na(tf2_c) and not na(tf2_o)
-        array.push(signs, tf2_c > tf2_o)
+        if tf2_c > tf2_o
+            ftfc_down := false
+        else
+            ftfc_up := false
     if tf3_en and not na(tf3_c) and not na(tf3_o)
-        array.push(signs, tf3_c > tf3_o)
+        if tf3_c > tf3_o
+            ftfc_down := false
+        else
+            ftfc_up := false
     if tf4_en and not na(tf4_c) and not na(tf4_o)
-        array.push(signs, tf4_c > tf4_o)
+        if tf4_c > tf4_o
+            ftfc_down := false
+        else
+            ftfc_up := false
     if tf5_en and not na(tf5_c) and not na(tf5_o)
-        array.push(signs, tf5_c > tf5_o)
+        if tf5_c > tf5_o
+            ftfc_down := false
+        else
+            ftfc_up := false
     if tf6_en and not na(tf6_c) and not na(tf6_o)
-        array.push(signs, tf6_c > tf6_o)
-    res = sg.continuity(signs)
-    if array.size(signs) == 0
-        [true, true]
-    else
-        [res == "Up", res == "Down"]
+        if tf6_c > tf6_o
+            ftfc_down := false
+        else
+            ftfc_up := false
+    [ftfc_up, ftfc_down]
 
 // ============================================================================
 // SECTION 5: DECISION LOGIC FUNCTIONS
@@ -1183,11 +1202,19 @@ detectBarTypeAndFailed(prevH, prevL, currH, currL, currO, currC) =>
     if na(prevH) or na(prevL) or na(currH) or na(currL) or na(currO) or na(currC) or currH < currL or prevH < prevL
         ["", false]
     else
-        state = sg.classify(prevH, prevL, currO, currH, currL, currC, failed_2_method, false)
+        // PERF-ALLOC-3: sg.structureOf + sg.isFailed rather than sg.classify. classify
+        // builds a BarState object, and this function runs once per chart bar over all
+        // history when Strat Candles bar coloring is on, and per bar per slot when stops
+        // are on. structureOf and isFailed are pure - the classification still comes from
+        // the library, only the object does not. The three lines below are sg.notation()'s
+        // projection inlined; the library method remains its definition of record.
+        s = sg.structureOf(prevH, prevL, currH, currL)
+        aboveOpen = currC > currO
         // FIX P1-f preserved: with Failing 2 detection off, this path shows plain 2s so the
         // table and labels never disagree with the engine.
-        state.failed := state.failed and enableFailed2Detection
-        [state.notation(), state.failed]
+        isFailed = enableFailed2Detection and sg.isFailed(prevH, prevL, currO, currC, s, failed_2_method)
+        barType = s == "1" ? (aboveOpen ? "1u" : "1d") : s == "3" ? (aboveOpen ? "3u" : "3d") : (isFailed ? "F" : "") + s
+        [barType, isFailed]
 
 computeSignalState(data, tf, raw, showOpen, populateDebug, debugTfStr) =>
     tfTime = raw.c1Time
@@ -1806,6 +1833,46 @@ var SimpleLabelData openLabels = SimpleLabelData.new(array.new<float>(), array.n
 // takes the pool object by reference so it can advance the cursor (functions cannot mutate globals).
 var LabelPoolT lblPool = LabelPoolT.new(array.new<label>(), 0)
 
+// FIX LABELTEXT-1: a label's text color is its LINE's color - but the line is drawn on the
+// chart background while the text sits on the label's own background, and nothing ever
+// checked that the two read against each other. The bearish "Crossed" default (#4a4a4a) as
+// text on the default label background (#2e2e2e) is 1.53:1, invisible: crossing a low-side
+// magnitude or exhaustion level turned its label into a black tab. Only the low side broke -
+// the bullish Crossed default (#9c9c9c) happens to pass at 4.95:1. Line colors are untouched;
+// only text is lifted, and only when it would not read, so every existing visual cue survives.
+// Threshold is 3.0:1 - WCAG AA for large text and UI components, the right bar for a chart
+// label rather than the 4.5:1 body-text bar. That distinction decides the whole fix: against
+// the default label background #4a4a4a sits at 1.53:1 while all eleven other palette colors
+// sit at 3.12:1 or better, so 3.0 rescues the one broken color and leaves the rest bit-for-bit
+// untouched. A 4.5 threshold repaints the entire palette pastel to fix one gray.
+srgbLin(float v) =>
+    v <= 0.03928 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4)
+
+relLum(color c) =>
+    0.2126 * srgbLin(color.r(c) / 255) + 0.7152 * srgbLin(color.g(c) / 255) + 0.0722 * srgbLin(color.b(c) / 255)
+
+contrastOn(color fg, color bg) =>
+    lf = relLum(fg)
+    lb = relLum(bg)
+    (math.max(lf, lb) + 0.05) / (math.min(lf, lb) + 0.05)
+
+// Walk the text color toward white (or black, on a light background) until it clears the bar.
+// Returns fg unchanged when it already reads, so a passing palette is bit-for-bit untouched.
+readableOn(color fg, color bg) =>
+    color out = fg
+    if contrastOn(fg, bg) < 3.0
+        float tr = relLum(bg) < 0.18 ? 255.0 : 0.0
+        float fr = color.r(fg)
+        float fg_ = color.g(fg)
+        float fb = color.b(fg)
+        for i = 1 to 12
+            k = i / 12.0
+            cand = color.rgb(fr + (tr - fr) * k, fg_ + (tr - fg_) * k, fb + (tr - fb) * k, 0)
+            out := cand
+            if contrastOn(cand, bg) >= 3.0
+                break
+    out
+
 acquireLabel(pool, int x, float y, string txt, bool useBarIndex, color bg, color txtCol, sz) =>
     xl = useBarIndex ? xloc.bar_index : xloc.bar_time
     label lbl = na
@@ -2062,10 +2129,11 @@ consolidateAndCreate(labelData, pool) =>
             labelTime = array.get(consolidatedTimes, i)
             displayText = showPriceInLabel ? labelText + " " + str.tostring(price, format.mintick) : labelText
             lblSize = getSize(labelTextSize)
+            labelTextColor = readableOn(labelColor, labelBackgroundColor)  // FIX LABELTEXT-1
             if showTimelineLabels
-                acquireLabel(pool, labelTime + (labelOffset * tfSeconds), price, displayText, false, labelBgColor, labelColor, lblSize)
+                acquireLabel(pool, labelTime + (labelOffset * tfSeconds), price, displayText, false, labelBgColor, labelTextColor, lblSize)
             if showFloatingLabels
-                acquireLabel(pool, bar_index + floatingLabelOffset, price, displayText, true, labelBgColor, labelColor, lblSize)
+                acquireLabel(pool, bar_index + floatingLabelOffset, price, displayText, true, labelBgColor, labelTextColor, lblSize)
 
 if barstate.islast
     array.clear(highLabels.prices)
