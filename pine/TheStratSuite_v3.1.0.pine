@@ -1841,7 +1841,18 @@ var LabelPoolT lblPool = LabelPoolT.new(array.new<label>(), 0)
 // the bullish Crossed default (#9c9c9c) happens to pass at 4.95:1. Line colors are untouched;
 // only text is lifted, and only when it would not read, so every existing visual cue survives.
 // Threshold is 3.0:1 - WCAG AA for large text and UI components, the right bar for a chart
-// label rather than the 4.5:1 body-text bar. That distinction decides the whole fix: against
+// label rather than the 4.5:1 body-text bar.
+//
+// Measured against labelBackgroundColor as configured, NOT against that color alpha-composited
+// over chart.bg_color. The composite is more correct in theory and was tried first; it was
+// rejected on evidence. Two reasons. It predicts that most of the palette is unreadable on a
+// light chart (3_LOW 1.85:1, gray 2.03, bearish Signal 2.06, 3_HIGH 2.25), which the actual
+// chart contradicts - those labels read fine, only the one gray does not. And once composited
+// there is no single threshold that isolates the broken color on both light and dark charts:
+// it would have to sit above 1.64 (broken, dark chart) and below 1.85 (next-worst, light
+// chart), a 0.21-wide window, which is not a threshold, it is a coincidence. Against the
+// configured background the same separation is 1.53 vs 3.12, so 3.0 sits in a 1.59-wide gap.
+// If a future report flags the missing composite, this is why. That distinction decides the whole fix: against
 // the default label background #4a4a4a sits at 1.53:1 while all eleven other palette colors
 // sit at 3.12:1 or better, so 3.0 rescues the one broken color and leaves the rest bit-for-bit
 // untouched. A 4.5 threshold repaints the entire palette pastel to fix one gray.
