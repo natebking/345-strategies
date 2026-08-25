@@ -22,9 +22,11 @@ Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 
 ### `pine/` — indicator source (newest first)
 
-- **`TheStratSuite_v3.1.0.pine`** — current build. GRAMMAR-LIB-1 (classification delegated to
-  TheStratGrammar), CONT22-PRIOR-1 (2-2 continuations no longer blocked by a prior
-  outside bar), DEBUG-TERMS-1 (debug panel shows every in-force term).
+- **`TheStratSuite_v3.1.0.pine`** — current build, published 2026-08-25. GRAMMAR-LIB-1
+  (classification delegated to TheStratGrammar), CONT22-PRIOR-1 (2-2 continuations no longer
+  blocked by a prior outside bar), DEBUG-TERMS-1 (debug panel shows every in-force term),
+  PERF-FTFC-1 and PERF-ALLOC-3 (two per-bar costs the library migration introduced, removed),
+  LABELTEXT-1 (a label whose text color had no contrast against its own background).
 - `TheStratSuite_v3.0.1.pine` — TABLE-COMPACT-COLOR-1 (Compact table cells colored by signal
   state or per-timeframe continuity), LEAD-TABLE-1, abbreviated Universal labels.
 - `TheStratSuite_v3.0.0.pine` — the first open-source publication on TradingView. BARCOLOR-1
