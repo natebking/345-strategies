@@ -1848,8 +1848,12 @@ var LabelPoolT lblPool = LabelPoolT.new(array.new<label>(), 0)
 srgbLin(float v) =>
     v <= 0.03928 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4)
 
+// 255.0, not 255: if color.r/g/b ever hand back an int, int/int is integer division and every
+// channel collapses to 0 - every color would read as black, contrast would compute as ~1.0
+// against anything, and the guard below would repaint every label white. The float literal
+// makes the division float regardless of what the built-ins return.
 relLum(color c) =>
-    0.2126 * srgbLin(color.r(c) / 255) + 0.7152 * srgbLin(color.g(c) / 255) + 0.0722 * srgbLin(color.b(c) / 255)
+    0.2126 * srgbLin(color.r(c) / 255.0) + 0.7152 * srgbLin(color.g(c) / 255.0) + 0.0722 * srgbLin(color.b(c) / 255.0)
 
 contrastOn(color fg, color bg) =>
     lf = relLum(fg)
@@ -1860,16 +1864,19 @@ contrastOn(color fg, color bg) =>
 // Returns fg unchanged when it already reads, so a passing palette is bit-for-bit untouched.
 readableOn(color fg, color bg) =>
     color out = fg
+    // Hysteresis on purpose: only intervene below 3.0, but once intervening climb to 3.5.
+    // Stopping the instant it clears 3.0 leaves the rescued color sitting on the threshold
+    // (#4a4a4a lands at 3.03:1, still hard to read); 3.5 gives it real margin.
     if contrastOn(fg, bg) < 3.0
         float tr = relLum(bg) < 0.18 ? 255.0 : 0.0
-        float fr = color.r(fg)
-        float fg_ = color.g(fg)
-        float fb = color.b(fg)
+        float srcR = color.r(fg)
+        float srcG = color.g(fg)
+        float srcB = color.b(fg)
         for i = 1 to 12
             k = i / 12.0
-            cand = color.rgb(fr + (tr - fr) * k, fg_ + (tr - fg_) * k, fb + (tr - fb) * k, 0)
+            cand = color.rgb(srcR + (tr - srcR) * k, srcG + (tr - srcG) * k, srcB + (tr - srcB) * k, 0)
             out := cand
-            if contrastOn(cand, bg) >= 3.0
+            if contrastOn(cand, bg) >= 3.5
                 break
     out
 
