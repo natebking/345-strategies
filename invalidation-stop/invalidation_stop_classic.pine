@@ -1,0 +1,529 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0
+// If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/
+// © SpinTrades
+// Based on TheStrat trading methodology by Rob Smith
+//
+// ============================================================================
+// Invalidation Stop Classic
+// Fork of code/pa_invalidation_stop.pine (natebking/thestrat @ c99d1b2, 2026-08-08).
+//
+// Three deliberate differences from the parent:
+//
+//   1. CLASSIC ONLY. Mike's Version, Strat-PSAR, Aggression, Compare, the cascade-break exit,
+//      the Catastrophe Stop, the Live Class cascade and the candle-shape adjust are all gone,
+//      along with the Version dropdown that selected between them. What is left is the
+//      structural step-stop the parent's tooltip calls Classic: the prior completed 30m/60m
+//      extreme, the 2-in-direction tighten at HTF close, the F2 tighten, and a one-way ratchet.
+//
+//   2. ALWAYS IN A DIRECTION. No neutral state, no HTF direction-support gate, no re-entry
+//      cooldown - nothing decides whether a side is allowed to display. One line sits on the
+//      chart from the first bar the HTF levels exist, and a break flips it to the other side on
+//      the spot. The parent's use_neutral, dir_long_active/dir_short_active and reentry_block
+//      are not ported.
+//
+//   3. SESSION RESET (2026-08-12). At the regular-session open the machine forgets the
+//      overnight leg - side, ratchet and 3-latch - and re-seeds from the open: side by
+//      location vs the prior 30m/60m levels, stop at the tightest completed level on the
+//      correct side (pool incl. yesterday's D extremes, so gapped opens seed at the gap-fill
+//      level). A prior-day-direction side pick was tried and reverted the same day - see the
+//      seed branch note. The overnight ratchet does not dictate the opening posture, and a
+//      gap through the carried stop cannot print a fictitious flip X. Input, default ON.
+//
+// The 3-override is OFF by default (2026-08-21, Nate's call: Classic means NO 3-override until
+// the latch earns its way back in - it is not working perfectly yet). When enabled it latches
+// from the 15m ONLY - a deliberate divergence from the parent (2026-08-12 finding, first live
+// day, NQ 15m). The parent latches the smallest
+// LIVE 3 across 15m/30m/60m; when the only live 3 was a forming 60m, that pinned the stop at an
+// hour-scale extreme ~90 points off price until the hour closed, twice in one afternoon, with
+// every tighten suspended. The widen's benefit (surviving an outside bar's second-side sweep)
+// is a minutes-scale event; its cost scales with the 3's timeframe. So only the 15m may latch,
+// and a live 30m/60m 3 changes nothing until it completes, when the close-based tighten already
+// counts it. To be ported back to the canonical pa_invalidation_stop.pine. The latch is still
+// the one rule that can WIDEN the stop - switch respect_3 off if you need the pure one-way
+// ratchet (and to match what the server-side port enforces).
+// ============================================================================
+
+//@version=6
+indicator("Invalidation Stop Classic", "Inval Stop Classic", overlay=true, max_polylines_count=20, max_labels_count=20)
+
+// === Inputs ===
+// --- Behavior ---
+G_BEHAVIOR = "Behavior"
+tighten_on_2 = input.bool(true, "Tighten on 2-in-direction (at HTF close)", group=G_BEHAVIOR, tooltip="At each 30m/60m close, if the just-closed bar CLOSED beyond its own two-back extreme in the trade direction, ratchet the stop to that just-closed bar's own low (long) / high (short). The trigger is close-based, not bar-type-based, so a completed 3 that closed in-direction fires it too - that is the whole 'counts for threes' rule.")
+respect_3    = input.bool(false, "3-override: latch stop at 15m 3's H/L once per episode", group=G_BEHAVIOR, tooltip="OFF by default (2026-08-21): the 3-override is not trusted yet - Classic currently means NO 3-override.\n\nWhen enabled: when the forming 15m bar goes OUTSIDE (takes the prior 15m bar's high AND low), the stop re-anchors ONCE to that 3's far extreme (low for longs, high for shorts) and freezes when the bar closes. Price extending beyond the latch is a real breach and flips the line. Consecutive 15m outside bars keep the FIRST bar's latch - extension through it is the breach, not a re-anchor. When a 15m closes back inside, the latch clears and structural rules resume. A flip taken while the 3 is live re-anchors at that moment's extreme.\n\n15m ONLY (2026-08-12): live 30m/60m 3s never latch. The parent's rule (smallest live 3 across 15m/30m/60m) pinned the stop at a forming 60m 3's extreme ~90 NQ points off price for the rest of its hour, tightens suspended. An hour-scale outside bar is structure changing; it already counts at its close via the 2-in-direction tighten and the next period's base levels.\n\nWith the session reset, this is one of two rules that can WIDEN the stop. Off = one-way ratchet within a session.")
+reset_session = input.bool(true, "Reset at session open (RTH)", group=G_BEHAVIOR, tooltip="At the first bar of the REGULAR session (9:30 ET for CME index futures - the 18:00 ET day roll does not reset), forget the carried side, ratchet and 3-latch, and re-seed: side by where price sits vs the prior 30m/60m levels; stop = tightest prior extreme (30m/60m/day) on the correct side of price - after a gap that is the gap-fill level. The side is a location read, not a direction opinion; a wrong pick costs one early flip at a real level. Why: the overnight leg arrives at the open with a stop ratcheted through thin-tape levels, and a gap through that stop would print an instant flip with an X at a level that never traded. A same-side reseed releases yesterday's ratchet back to current structure - the one other place besides the 3-latch where the stop can widen. No X or flip marker is drawn for a reset; Pine Logs record it as SESSION_RESET. A 15m 3 live at the open re-anchors at the reset moment's extremes, same as a flip during a live 3. On 24x7 symbols the regular session is the whole day, so this becomes a daily-open reset.")
+
+// --- Visual ---
+G_VISUAL = "Visual"
+recent_leg_only  = input.bool(false, "Show only the most recent leg", group=G_VISUAL, tooltip="OFF (default): the stop line is drawn across the whole chart - blue while long, orange while short, stepping at each re-level. Because this fork is always in a direction, that line is continuous with no gaps.\n\nON: only the CURRENT leg is drawn - one continuous directional run - and the previous leg is erased at each flip. Clean chart, no history.\n\nControls the stop line and the flip X only. The optional event markers below still plot across all history when you switch them on.")
+show_flips       = input.bool(false, "Flip markers", group=G_VISUAL)
+show_tightens    = input.bool(false, "Tighten event markers (2u/2d, F2, 3)", group=G_VISUAL)
+show_state_bg    = input.bool(false, "State background tint", group=G_VISUAL)
+show_htf_levels  = input.bool(false, "HTF reference levels (p30l/p30h/p60l/p60h)", group=G_VISUAL)
+show_exit_x      = input.bool(true,  "Mark stop-trigger points (X)", group=G_VISUAL, tooltip="Plots an X at the exact level/bar where the stop triggered and the line flipped, colored to match the line that triggered. Makes it clear where the trail-out happened versus where the step-line merely re-levels at an HTF boundary.")
+
+// --- Debug ---
+G_DEBUG = "Debug"
+log_flips = input.bool(false, "Emit diagnostic Pine Logs", group=G_DEBUG)
+
+// === Prior completed HTF bar H/L (anti-repaint: lookahead_on + [1]) ===
+p30h = request.security(syminfo.tickerid, "30", high[1], lookahead=barmerge.lookahead_on)
+p30l = request.security(syminfo.tickerid, "30", low[1],  lookahead=barmerge.lookahead_on)
+p60h = request.security(syminfo.tickerid, "60", high[1], lookahead=barmerge.lookahead_on)
+p60l = request.security(syminfo.tickerid, "60", low[1],  lookahead=barmerge.lookahead_on)
+
+// === Just-closed HTF close + two-back H/L (for the 2u/2d tighten at HTF close) ===
+p30c1 = request.security(syminfo.tickerid, "30", close[1], lookahead=barmerge.lookahead_on)
+p30h2 = request.security(syminfo.tickerid, "30", high[2],  lookahead=barmerge.lookahead_on)
+p30l2 = request.security(syminfo.tickerid, "30", low[2],   lookahead=barmerge.lookahead_on)
+p60c1 = request.security(syminfo.tickerid, "60", close[1], lookahead=barmerge.lookahead_on)
+p60h2 = request.security(syminfo.tickerid, "60", high[2],  lookahead=barmerge.lookahead_on)
+p60l2 = request.security(syminfo.tickerid, "60", low[2],   lookahead=barmerge.lookahead_on)
+
+// === Prior completed DAY (gap-fill seed levels only - see the seed branch note) ===
+pDh = request.security(syminfo.tickerid, "D", high[1],  lookahead=barmerge.lookahead_on)
+pDl = request.security(syminfo.tickerid, "D", low[1],   lookahead=barmerge.lookahead_on)
+
+// === 15m LTF reference (F2 tighten target + live-3 detection) ===
+ltf15_close_prev = request.security(syminfo.tickerid, "15", close[1], lookahead=barmerge.lookahead_on)
+ltf15_high_prev  = request.security(syminfo.tickerid, "15", high[1],  lookahead=barmerge.lookahead_on)
+ltf15_low_prev   = request.security(syminfo.tickerid, "15", low[1],   lookahead=barmerge.lookahead_on)
+
+// === Running H/L for in-progress HTF/LTF bars, accumulated from chart bars ===
+new15 = ta.change(time("15")) != 0
+new30 = ta.change(time("30")) != 0
+new60 = ta.change(time("60")) != 0
+
+var float c15h = na
+var float c15l = na
+var float c30h = na
+var float c30l = na
+var float c60h = na
+var float c60l = na
+c15h := new15 ? high : math.max(nz(c15h, high), high)
+c15l := new15 ? low  : math.min(nz(c15l, low),  low)
+c30h := new30 ? high : math.max(nz(c30h, high), high)
+c30l := new30 ? low  : math.min(nz(c30l, low),  low)
+c60h := new60 ? high : math.max(nz(c60h, high), high)
+c60l := new60 ? low  : math.min(nz(c60l, low),  low)
+
+// === Forming-bar 2u/2d, just-closed 2u/2d, and F2 ===
+curr_30_2u = c30h > p30h
+curr_30_2d = c30l < p30l
+curr_60_2u = c60h > p60h
+curr_60_2d = c60l < p60l
+
+just_30_closed_2u = new30 and p30c1 > p30h2
+just_30_closed_2d = new30 and p30c1 < p30l2
+just_60_closed_2u = new60 and p60c1 > p60h2
+just_60_closed_2d = new60 and p60c1 < p60l2
+
+htf_f2u_active = (curr_30_2u and ltf15_close_prev < p30h) or (curr_60_2u and ltf15_close_prev < p60h)
+htf_f2d_active = (curr_30_2d and ltf15_close_prev > p30l) or (curr_60_2d and ltf15_close_prev > p60l)
+
+// === 3-in-progress detection (intrabar): bar took prior bar's high AND prior bar's low ===
+curr_15_3 = not na(ltf15_high_prev) and not na(ltf15_low_prev) and c15h > ltf15_high_prev and c15l < ltf15_low_prev
+curr_30_3 = curr_30_2u and curr_30_2d   // detected for logs only - big-TF 3s never latch (see below)
+curr_60_3 = curr_60_2u and curr_60_2d
+
+// === 3-override episode latch (15m ONLY, one widen per contiguous episode) ====
+// 2026-08-12 rebalance (NQ 15m, this fork's first live day). The parent latches the smallest
+// LIVE 3 across 15m/30m/60m; when the only live 3 was the forming 60m, the latch grabbed an
+// hour-scale extreme and pinned the stop there until the hour closed - ~90 points off price,
+// every tighten suspended, twice in one afternoon. The signature on the chart: the pins end
+// exactly at 60m boundaries. The rebalance: the widen's benefit (surviving the second side of
+// an outside sweep) is a minutes-scale event, but its cost (stop distance + how long tightens
+// stay suspended) scales with the 3's timeframe. So only the 15m - the smallest structural
+// frame here - may latch: bounded to one 15m bar's range, pinned for at most that bar. A live
+// 30m/60m 3 changes nothing while forming; when it completes in-direction it fires the
+// close-based tighten like any other bar (the 'counts for threes' rule) and its extremes enter
+// the next period's base. Episode = contiguous run of 15m outside bars; chained 3s keep the
+// FIRST bar's latch, so a second 3 extending through it is a real breach, not a re-anchor.
+// The clear commits only on a CONFIRMED non-3 bar so realtime and history agree on chaining
+// (a new bar's first ticks are never a 3 yet; clearing on them would drop the latch mid-chain
+// live while replay kept it). Within the detection bar itself the latch tracks that bar's
+// running extreme (Pine rollback re-runs the assignment per tick) and freezes at its close.
+var float latch3_lo = na
+var float latch3_hi = na
+var bool  ep3_live  = false
+if curr_15_3 and not ep3_live
+    ep3_live  := true
+    latch3_lo := c15l
+    latch3_hi := c15h
+if barstate.isconfirmed and not curr_15_3
+    ep3_live  := false
+    latch3_lo := na
+    latch3_hi := na
+
+// === Structural levels ===
+long_stop  = math.max(p30l, p60l)   // TIGHTER HTF low  - the immediate invalidation
+short_stop = math.min(p30h, p60h)
+long_back  = math.min(p30l, p60l)   // LOOSER HTF low   - fallback when the tighter pair inverts
+short_back = math.max(p30h, p60h)
+levels_ready = not na(long_stop) and not na(short_stop)
+
+// Side gate for the RATCHET base. A base candidate only counts on the correct side of price,
+// mirroring the server's stopOnCorrectSide (lib/governor/resolver.ts:109-112): the prior 30m
+// and prior 60m are different windows, and in a fast trend they can be disjoint, which INVERTS
+// the tighter pair (long_stop above short_stop). Wrong side falls back to the looser extreme.
+// In the normal case base_L is exactly long_stop / base_S exactly short_stop, so the Classic
+// per-bar ratchet is unchanged. Seeds and flips do NOT use these - see f_tight_* below.
+base_L = long_stop  <= close ? long_stop  : long_back  <= close ? long_back  : na
+base_S = short_stop >= close ? short_stop : short_back >= close ? short_back : na
+
+// Seed levels (session seed AND flips): the TIGHTEST completed extreme on the correct side of
+// price, pool = all six prior levels (30m/60m lows AND highs, plus the prior day's low/high).
+// Two dated findings drive this:
+//   2026-08-12, SPY session seed: at a gapped open every stale closing-hour extreme sits on
+//   one side of price, and the wide base handed a gap-up long yesterday's LOW - a stop across
+//   the gap. Tightest correct-side level = the gap-fill read: a gap-up long dies when price
+//   falls back inside the prior range.
+//   2026-08-19, SPY 6:42am flip: flips still used the wide base (to avoid re-seeding at the
+//   broken level), and before today's first 30m completed that base was yesterday afternoon's
+//   lows, 3 points under price. Flips moved to this pool instead.
+//   2026-08-21, 5m vs 1m divergence: flips first anchored at the CHART bar's close, and the
+//   same breakdown closed deeper past the break on the 5m bar than on the 1m bar - the 5m
+//   picked a nearer rung, got clipped by a bounce the 1m's pick survived, and the two charts
+//   showed different flip sequences. Flips now anchor at the BREACHED LEVEL itself: seed =
+//   tightest completed level strictly beyond the break (px and excl both = the broken level).
+//   A pure function of TF-independent inputs, so every chart TF seeds the same flip. Also the
+//   honest structural read: a break is in force until price reclaims the level it broke; the
+//   rungs between price and the break belong to the range price just left.
+// The governing intention (Nate, 2026-08-19): the stop is the nearest completed structure
+// that SHOULD hold if the move is real, never a far level that would blow the trade out.
+// A prior-day extreme therefore participates only when it is the nearest level (the gap-fill
+// case), never as a far-side backstop - the tightest-selection enforces that by construction.
+// Residual chart-TF dependence, accepted for now: breach tests run on chart bars (a violent
+// one-bar whipsaw can flip twice on the 1m where the 5m flips once), the ratchet's side gate
+// reads the chart close, and the empty-pool fallback is the chart bar's own extreme. If those
+// ever matter in practice, the next step is running the machine on a fixed decision TF.
+// excl: exclusion is by VALUE, so twin 30m/60m extremes at the same price are both skipped.
+f_tight_below(float px, float excl) =>
+    float m = na
+    for lv in array.from(p30l, p60l, p30h, p60h, pDl, pDh)
+        if not na(lv) and lv <= px and (na(excl) or lv != excl) and (na(m) or lv > m)
+            m := lv
+    m
+f_tight_above(float px, float excl) =>
+    float m = na
+    for lv in array.from(p30l, p60l, p30h, p60h, pDl, pDh)
+        if not na(lv) and lv >= px and (na(excl) or lv != excl) and (na(m) or lv < m)
+            m := lv
+    m
+
+// =============================================================================
+// === STATE MACHINE: 1 = long, -1 = short. There is no neutral. ================
+// =============================================================================
+// state 0 exists only until the first bar where both HTF priors are available - that is data
+// arriving, not a gate. From the seed on, the machine is always in a side and every exit is a
+// flip. Both tightens use levels that are components of the base (p30l/p60l) or a real prior
+// bar (the 15m F2 target), so a tighten that lands on the wrong side of price is a genuine
+// invalidation and flips the line - once, because the flip re-seeds beyond the broken level.
+var int   state    = 0
+var float stop     = na
+var float exit_px  = na   // level where the stop last triggered (for the X marker)
+var float disp     = na   // stop level DRAWN this bar, incl. the flip bar, so the X lands on the line
+var int   disp_dir = 0    // direction the drawn level belongs to (1=long, -1=short, 0=pre-seed)
+
+// Session reset: on the regular session's first bar, drop the carried leg and fall through to
+// the seed branch below, which re-derives side and stop from the open. reset_evt stays true
+// for the whole bar (computed pre-mutation) and gates the flip X, the flip markers, the FLIP
+// log and the leg continuity, so a reset never masquerades as a stop-out.
+reset_evt = reset_session and session.isfirstbar_regular and state != 0
+if reset_evt
+    state := 0
+    stop := na
+    disp := na
+    disp_dir := 0
+    ep3_live := false
+    latch3_lo := na
+    latch3_hi := na
+    if curr_15_3
+        // A 3 live at the open anchors at the reset moment's extremes (same rule as a flip
+        // during a live 3) so the seed below can pick the latch up via nz().
+        ep3_live := true
+        latch3_lo := c15l
+        latch3_hi := c15h
+
+if state == 1
+    stop := na(stop) ? nz(f_tight_below(close, float(na)), low) : math.max(stop, nz(base_L, stop))
+    if tighten_on_2
+        if just_30_closed_2u
+            stop := math.max(stop, p30l)
+        if just_60_closed_2u
+            stop := math.max(stop, p60l)
+    if htf_f2u_active and not na(ltf15_low_prev)
+        stop := math.max(stop, ltf15_low_prev)
+    if respect_3 and not na(latch3_lo)
+        stop := latch3_lo
+    disp := stop
+    disp_dir := 1
+    if not na(stop) and low < stop
+        exit_px := stop
+        state := -1
+        stop := nz(f_tight_above(exit_px, exit_px), high)
+        if respect_3 and curr_15_3
+            latch3_hi := c15h
+else if state == -1
+    stop := na(stop) ? nz(f_tight_above(close, float(na)), high) : math.min(stop, nz(base_S, stop))
+    if tighten_on_2
+        if just_30_closed_2d
+            stop := math.min(stop, p30h)
+        if just_60_closed_2d
+            stop := math.min(stop, p60h)
+    if htf_f2d_active and not na(ltf15_high_prev)
+        stop := math.min(stop, ltf15_high_prev)
+    if respect_3 and not na(latch3_hi)
+        stop := latch3_hi
+    disp := stop
+    disp_dir := -1
+    if not na(stop) and high > stop
+        exit_px := stop
+        state := 1
+        stop := nz(f_tight_below(exit_px, exit_px), low)
+        if respect_3 and curr_15_3
+            latch3_lo := c15l
+else if levels_ready
+    // Seed (chart start + session reset): side by where price sits vs the prior 30m/60m
+    // levels, stop at the tightest completed extreme on the correct side (f_tight pool incl.
+    // yesterday's D extremes, so a gapped open seeds at the gap-fill level instead of across
+    // the gap). The side is a LOCATION read, deliberately not an opinion. A prior-day-
+    // direction seed (gap-up after a down day seeds short at the D high) was tried and
+    // reverted the same day, 2026-08-12: every Classic rule changes state only through price
+    // trading at a level, and a side asserted from yesterday's bar color parked the stop at
+    // the far D extreme, suspending flips for hours behind a wide stop - the 60m 3-latch
+    // disease in milder form. A wrong side pick here costs one early flip at a real level,
+    // and the normal tightens hand off to today's completed bars within the hour. Judged at
+    // the seed bar's OPEN: the session's first print is the same on every chart TF and cannot
+    // move intrabar, so every TF seeds identically and the side never flickers between ticks.
+    state := open >= (long_stop + short_stop) / 2 ? 1 : -1
+    stop := state == 1 ? nz(f_tight_below(open, float(na)), low) : nz(f_tight_above(open, float(na)), high)
+    if respect_3
+        stop := state == 1 ? nz(latch3_lo, stop) : nz(latch3_hi, stop)
+    disp := stop
+    disp_dir := state
+
+// =============================================================================
+// === PLOTS ===================================================================
+// =============================================================================
+// ONE line, always on screen: the line IS the trigger - a touch flips it. A near-black halo
+// under it carves a dark moat through same-colored candles.
+sc_color = disp_dir == 1 ? color.new(color.blue, 0) : color.new(color.orange, 0)
+halo     = color.new(color.black, 10)
+
+// Full history (recent_leg_only OFF). plot() can never be un-drawn once a bar is painted, so the
+// most-recent-leg view is rendered with polylines further down instead of with these plots.
+// disp = the level DRAWN this bar - identical to what the flip is checked against, and still
+// drawn on the flip bar, so a wick that crosses the visible line always produces an X on it.
+plot(not recent_leg_only and disp_dir != 0 ? disp : na, "Stop Halo", color=halo,     linewidth=5, style=plot.style_steplinebr, editable=false)
+plot(not recent_leg_only and disp_dir != 0 ? disp : na, "Stop",      color=sc_color, linewidth=2, style=plot.style_steplinebr)
+
+// Stop-trigger X: where the stop actually triggered and the line flipped, colored to match the
+// line that triggered. Distinct from the step-line merely re-leveling at an HTF boundary.
+flip_evt = (state[1] == 1 or state[1] == -1) and state != state[1] and not reset_evt
+flip_col = state[1] == 1 ? color.new(color.blue, 0) : color.new(color.orange, 0)
+plotshape(not recent_leg_only and show_exit_x and flip_evt ? exit_px : na, "Stop Trigger X", style=shape.xcross, location=location.absolute, color=flip_col, size=size.small)
+
+// =============================================================================
+// === MOST-RECENT-LEG RENDERING (polylines) ===================================
+// =============================================================================
+// A "leg" = one continuous directional run. plot() paints a bar and can never take it back, so
+// the decluttered view is drawn with polylines: the leg accumulates its own step points, and
+// starting a new leg clears them, which erases the old line. Points are only pushed on CONFIRMED
+// bars - collections are not rolled back between realtime ticks, so pushing on an unconfirmed
+// bar would duplicate points every tick. The live bar is appended at draw time to a copy
+// instead. Drawings are deleted and rebuilt on the last bar only.
+LEG_MAX_PTS = 2000   // hard cap; a leg longer than this loses its oldest points, not its recent shape
+
+// Push one step point: if the level moved, first drop a point at the OLD level on this bar so the
+// polyline draws a vertical riser then a horizontal run (same shape as plot.style_steplinebr).
+// Cap passed in (functions can't read globals).
+f_step_push(pts, px, maxpts) =>
+    n = array.size(pts)
+    if n > 0
+        prev = array.get(pts, n - 1)
+        if prev.price != px
+            array.push(pts, chart.point.from_index(bar_index, prev.price))
+    array.push(pts, chart.point.from_index(bar_index, px))
+    if array.size(pts) > maxpts
+        array.shift(pts)
+    array.size(pts)
+
+var array<chart.point> leg_pts = array.new<chart.point>()
+var int leg_dir = 0
+var polyline pl_halo = na
+var polyline pl_line = na
+var label    lbl_x   = na
+
+// The one trigger X worth keeping: the one that started the drawn leg. An X stranded more than a
+// bar before the current leg is dropped as clutter.
+var float x_px  = na
+var int   x_bar = na
+var int   x_dir = 0
+
+leg_start = disp_dir != 0 and (disp_dir != nz(disp_dir[1]) or reset_evt)
+
+if recent_leg_only and barstate.isconfirmed
+    if leg_start
+        array.clear(leg_pts)
+        leg_dir := disp_dir
+        if not na(x_bar) and bar_index - x_bar > 1
+            x_px := na
+    if disp_dir != 0 and not na(disp)
+        f_step_push(leg_pts, disp, LEG_MAX_PTS)
+    if flip_evt and not na(exit_px)
+        x_px  := exit_px
+        x_bar := bar_index
+        x_dir := state[1]
+
+if recent_leg_only and barstate.islast
+    live = not barstate.isconfirmed
+    polyline.delete(pl_halo)
+    polyline.delete(pl_line)
+    label.delete(lbl_x)
+    // A leg that starts on the live bar has nothing committed yet - start from empty.
+    cp = array.new<chart.point>()
+    if not (live and leg_start)
+        cp := array.copy(leg_pts)
+    if live and disp_dir != 0 and not na(disp)
+        f_step_push(cp, disp, LEG_MAX_PTS)
+    if array.size(cp) > 1
+        dir_now = disp_dir != 0 ? disp_dir : leg_dir
+        col_now = dir_now == 1 ? color.new(color.blue, 0) : color.new(color.orange, 0)
+        pl_halo := polyline.new(array.copy(cp), line_color=halo,    line_width=5)
+        pl_line := polyline.new(cp,             line_color=col_now, line_width=2)
+    if show_exit_x and not na(x_px)
+        col_x = x_dir == 1 ? color.new(color.blue, 0) : color.new(color.orange, 0)
+        lbl_x := label.new(x_bar, x_px, "X", style=label.style_none, textcolor=col_x, size=size.small)
+
+// === Optional reference levels + markers ===
+plot(show_htf_levels ? p30l : na, "p30l", color=color.new(color.aqua,    70), linewidth=1, style=plot.style_stepline)
+plot(show_htf_levels ? p60l : na, "p60l", color=color.new(color.teal,    50), linewidth=1, style=plot.style_stepline)
+plot(show_htf_levels ? p30h : na, "p30h", color=color.new(color.fuchsia, 70), linewidth=1, style=plot.style_stepline)
+plot(show_htf_levels ? p60h : na, "p60h", color=color.new(color.purple,  50), linewidth=1, style=plot.style_stepline)
+
+bg_color = state == 1 ? color.new(color.blue, 95) : state == -1 ? color.new(color.orange, 95) : color.new(color.gray, 90)
+bgcolor(show_state_bg ? bg_color : na)
+
+plotshape(show_flips and flip_evt and state == -1 ? close : na, "Flip to Short", style=shape.triangledown, location=location.absolute, color=color.new(color.orange, 0), size=size.small, text="S", textcolor=color.white)
+plotshape(show_flips and flip_evt and state ==  1 ? close : na, "Flip to Long",  style=shape.triangleup,   location=location.absolute, color=color.new(color.blue,   0), size=size.small, text="L", textcolor=color.white)
+
+tighten_long_mark  = state == 1  and tighten_on_2 and (just_30_closed_2u or just_60_closed_2u)
+tighten_short_mark = state == -1 and tighten_on_2 and (just_30_closed_2d or just_60_closed_2d)
+plotshape(show_tightens and tighten_long_mark  ? stop : na, "2u Tighten", style=shape.triangleup,   location=location.absolute, color=color.new(color.blue,   0), size=size.tiny)
+plotshape(show_tightens and tighten_short_mark ? stop : na, "2d Tighten", style=shape.triangledown, location=location.absolute, color=color.new(color.orange, 0), size=size.tiny)
+
+var bool prev_f2u = false
+var bool prev_f2d = false
+f2_tighten_long  = state == 1  and htf_f2u_active and not prev_f2u
+f2_tighten_short = state == -1 and htf_f2d_active and not prev_f2d
+prev_f2u := htf_f2u_active
+prev_f2d := htf_f2d_active
+plotshape(show_tightens and f2_tighten_long  ? stop : na, "F2u Tighten", style=shape.diamond, location=location.absolute, color=color.new(color.aqua,    0), size=size.tiny)
+plotshape(show_tightens and f2_tighten_short ? stop : na, "F2d Tighten", style=shape.diamond, location=location.absolute, color=color.new(color.fuchsia, 0), size=size.tiny)
+
+three_latch_now = respect_3 and ep3_live and not ep3_live[1]
+plotshape(show_tightens and three_latch_now ? stop : na, "3 Latch", style=shape.xcross, location=location.absolute, color=color.new(color.white, 0), size=size.tiny)
+
+// =============================================================================
+// === DIAGNOSTIC LOGGING ======================================================
+// =============================================================================
+var int    last_flip_bar  = -1
+var bool   prev_log_f2u   = false
+var bool   prev_log_f2d   = false
+var float  prev_log_stop  = na
+var bool   prev_nm_l      = false
+var bool   prev_nm_s      = false
+
+if log_flips
+    time_str = str.format("{0,date,yyyy-MM-dd HH:mm:ss}", time)
+    st30_str = curr_30_3 ? "3" : curr_30_2u ? "2u" : curr_30_2d ? "2d" : "1"
+    st60_str = curr_60_3 ? "3" : curr_60_2u ? "2u" : curr_60_2d ? "2d" : "1"
+    st15_str = curr_15_3 ? "3" : (c15h > ltf15_high_prev ? "2u" : (c15l < ltf15_low_prev ? "2d" : "1"))
+    from_str = state[1] == 1 ? "L" : state[1] == -1 ? "S" : "-"
+    to_str   = state    == 1 ? "L" : state    == -1 ? "S" : "-"
+
+    if reset_evt
+        log.info("SESSION_RESET t=" + time_str + " from=" + from_str + " to=" + to_str +
+                 " prev_stop=" + str.tostring(stop[1], "#.##") +
+                 " new_stop=" + str.tostring(stop, "#.##") +
+                 " open_vs_prev_stop=" + str.tostring(close - stop[1], "#.##"))
+    if state != state[1] and not reset_evt
+        bars_since = last_flip_bar < 0 ? -1 : bar_index - last_flip_bar
+        since_min  = bars_since < 0 ? -1 : bars_since * timeframe.in_seconds() / 60
+        is_whippy  = bars_since >= 0 and bars_since < 10
+        chg_msg = (is_whippy ? "WHIPPY_FLIP" : "FLIP") +
+                  " t=" + time_str +
+                  " chart_tf=" + timeframe.period +
+                  " from=" + from_str +
+                  " to=" + to_str +
+                  " with_f2=" + ((from_str == "L" ? htf_f2u_active : htf_f2d_active) ? "T" : "F") +
+                  " since_bars=" + (bars_since < 0 ? "-" : str.tostring(bars_since)) +
+                  " since_min=" + (since_min < 0 ? "-" : str.tostring(since_min, "#")) +
+                  " trigger=" + str.tostring(exit_px, "#.##") +
+                  " close=" + str.tostring(close, "#.##") +
+                  " stop=" + str.tostring(stop, "#.##") +
+                  " p30l=" + str.tostring(p30l, "#.##") +
+                  " p30h=" + str.tostring(p30h, "#.##") +
+                  " p60l=" + str.tostring(p60l, "#.##") +
+                  " p60h=" + str.tostring(p60h, "#.##") +
+                  " inverted=" + (long_stop > short_stop ? "T" : "F") +
+                  " st15=" + st15_str +
+                  " st30=" + st30_str +
+                  " st60=" + st60_str
+        if is_whippy
+            log.warning(chg_msg)
+        else
+            log.info(chg_msg)
+        last_flip_bar := bar_index
+
+    if htf_f2u_active and not prev_log_f2u
+        log.info("F2u_ON t=" + time_str + " state=" + to_str + " stop=" + str.tostring(stop, "#.##"))
+    if not htf_f2u_active and prev_log_f2u
+        log.info("F2u_OFF t=" + time_str + " state=" + to_str + " stop=" + str.tostring(stop, "#.##"))
+    prev_log_f2u := htf_f2u_active
+
+    if htf_f2d_active and not prev_log_f2d
+        log.info("F2d_ON t=" + time_str + " state=" + to_str + " stop=" + str.tostring(stop, "#.##"))
+    if not htf_f2d_active and prev_log_f2d
+        log.info("F2d_OFF t=" + time_str + " state=" + to_str + " stop=" + str.tostring(stop, "#.##"))
+    prev_log_f2d := htf_f2d_active
+
+    if barstate.isconfirmed and ep3_live and not ep3_live[1]
+        log.info("THREE_EPISODE_START t=" + time_str + " state=" + to_str +
+                 " stop=" + str.tostring(stop, "#.##") +
+                 " latch_lo=" + str.tostring(latch3_lo, "#.##") +
+                 " latch_hi=" + str.tostring(latch3_hi, "#.##") +
+                 " applied=" + (respect_3 ? "T" : "F"))
+    if barstate.isconfirmed and not curr_15_3 and curr_15_3[1]
+        log.info("THREE_EPISODE_END t=" + time_str + " state=" + to_str + " stop=" + str.tostring(stop, "#.##"))
+    // Evidence for the canonical port: each live 30m/60m 3 logs the level the parent's all-TF
+    // rule would have latched, so a bar-replay quantifies exactly what 15m-only avoided (or cost).
+    if barstate.isconfirmed and curr_30_3 and not curr_30_3[1]
+        log.info("BIG3_NO_LATCH t=" + time_str + " tf=30 state=" + to_str +
+                 " stop=" + str.tostring(stop, "#.##") + " close=" + str.tostring(close, "#.##") +
+                 " would_lo=" + str.tostring(c30l, "#.##") + " would_hi=" + str.tostring(c30h, "#.##"))
+    if barstate.isconfirmed and curr_60_3 and not curr_60_3[1]
+        log.info("BIG3_NO_LATCH t=" + time_str + " tf=60 state=" + to_str +
+                 " stop=" + str.tostring(stop, "#.##") + " close=" + str.tostring(close, "#.##") +
+                 " would_lo=" + str.tostring(c60l, "#.##") + " would_hi=" + str.tostring(c60h, "#.##"))
+
+    if not na(stop) and (na(prev_log_stop) or stop != prev_log_stop)
+        delta = na(prev_log_stop) ? na : stop - prev_log_stop
+        log.info("STOP_CHG t=" + time_str +
+                 " state=" + to_str +
+                 " from=" + (na(prev_log_stop) ? "-" : str.tostring(prev_log_stop, "#.##")) +
+                 " to=" + str.tostring(stop, "#.##") +
+                 " delta=" + (na(delta) ? "-" : str.tostring(delta, "#.##")) +
+                 " dir=" + (na(delta) ? "-" : (state == 1 ? (delta > 0 ? "tighten" : "WIDEN") : (delta < 0 ? "tighten" : "WIDEN"))) +
+                 " close=" + str.tostring(close, "#.##"))
+        prev_log_stop := stop
+
+    nm_l_now = state == 1  and not na(stop) and c15l >= stop and c15l < stop + (stop * 0.001)
+    nm_s_now = state == -1 and not na(stop) and c15h <= stop and c15h > stop - (stop * 0.001)
+    if nm_l_now and not prev_nm_l
+        log.info("NEAR_MISS_L t=" + time_str + " c15l=" + str.tostring(c15l, "#.##") + " stop=" + str.tostring(stop, "#.##") + " diff=" + str.tostring(c15l - stop, "#.##"))
+    if nm_s_now and not prev_nm_s
+        log.info("NEAR_MISS_S t=" + time_str + " c15h=" + str.tostring(c15h, "#.##") + " stop=" + str.tostring(stop, "#.##") + " diff=" + str.tostring(c15h - stop, "#.##"))
+    prev_nm_l := nm_l_now
+    prev_nm_s := nm_s_now

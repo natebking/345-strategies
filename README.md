@@ -68,6 +68,14 @@ through a live basis: killzone session highs and lows, opening prices, prior day
 levels, and SPY overnight gap boxes on ES. Built on the `pine-draw/` library. Not published
 on TradingView. See `cross-levels/README.md`.
 
+### `invalidation-stop/` — always-in Classic invalidation stop (Pine v6)
+
+A standalone overlay that keeps one stop line on the chart at all times: the nearest
+completed 30m/60m/day structure that should hold if the current move is real. A touch flips
+it to the other side; a session reset re-seeds it at the open, at the gap-fill level after a
+gap. Forked from the Classic path of my invalidation stop work. Not published on
+TradingView. See `invalidation-stop/README.md`.
+
 ### `docs/`
 
 Start at `docs/README.md` (the index). Trader-facing docs live in `docs/concepts/`, engineering docs in `docs/engineering/`. Highlights:
