@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Vercel__get_runtime_logs",
+      "mcp__Vercel__get_runtime_errors",
+      "mcp__Vercel__list_deployments",
+      "mcp__Vercel__get_deployment",
+      "mcp__Vercel__get_deployment_build_logs",
+      "mcp__Vercel__get_project",
+      "mcp__Vercel__list_projects",
+      "mcp__Vercel__list_teams",
+      "mcp__Vercel__search_vercel_documentation",
+
+      "mcp__Supabase__list_tables",
+      "mcp__Supabase__list_projects",
+      "mcp__Supabase__list_migrations",
+      "mcp__Supabase__list_extensions",
+      "mcp__Supabase__get_project",
+      "mcp__Supabase__get_project_url",
+      "mcp__Supabase__get_advisors",
+      "mcp__Supabase__search_docs",
+
+      "mcp__github__get_file_contents",
+      "mcp__github__list_commits",
+      "mcp__github__get_commit",
+      "mcp__github__list_pull_requests",
+      "mcp__github__pull_request_read",
+      "mcp__github__list_issues",
+      "mcp__github__search_issues",
+      "mcp__github__search_code",
+      "mcp__github__list_branches",
+
+      "mcp__Claude_Code_Remote__list_repos",
+      "mcp__Claude_Code_Remote__get_session",
+      "mcp__Claude_Code_Remote__list_triggers"
+    ]
+  }
+}
