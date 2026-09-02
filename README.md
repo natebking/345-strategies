@@ -76,6 +76,14 @@ it to the other side; a session reset re-seeds it at the open, at the gap-fill l
 gap. Forked from the Classic path of my invalidation stop work. Not published on
 TradingView. See `invalidation-stop/README.md`.
 
+### `price-display/` — price readout and display studies (Pine v6)
+
+Standalone chart overlays built around a large readout and small monospaced labels.
+Price Display shows the latest chart price. Instrument Display is an experimental sibling
+with range-position, relative-range, and instrument-headline modes. Neither changes candles,
+adds signals, or imports the Suite. Native palette recipes, trial results, limits, and
+unimplemented ideas are in `price-display/README.md` and `price-display/DESIGN_NOTES.md`.
+
 ### `docs/`
 
 Start at `docs/README.md` (the index). Trader-facing docs live in `docs/concepts/`, engineering docs in `docs/engineering/`. Highlights:

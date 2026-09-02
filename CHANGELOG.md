@@ -8,6 +8,12 @@ How to read this file:
 - **Every fix cites its `FIX` tag.** Grep the current source for the tag to find the exact code and the full inline rationale. Code references are function names and tags, never line numbers.
 - **Dates** come from dated `FIX` comments and file names. Where a snapshot carries no date of its own (2.2.2), the newest dated comment introduced in it is used.
 
+## [Unreleased]
+
+### Added
+
+- Standalone Price Display and experimental Instrument Display siblings, with native chart palette recipes and a design log separating tested results from candidate ideas. No TheStrat Suite engine changes. (`DISPLAY-STUDIES-1`)
+
 ## [3.1.0] — 2026-08-25
 
 Requires TheStratGrammar (TV version 1) to be published before this compiles.

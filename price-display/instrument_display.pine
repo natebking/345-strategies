@@ -1,0 +1,88 @@
+//@version=6
+// DISPLAY-STUDIES-1 (2026-09-02): standalone design studies; no Suite engine changes.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Original, Rivian-inspired design studies. Not affiliated with Rivian.
+// Compiled and saved in TradingView 2026-09-02; all three modes visually checked
+// on BTCUSDT 1D and verified after saved-layout reload. Design study, not a signal.
+// Display only: no signals, alerts, orders, security requests, or chart recoloring.
+// All calculations use the current chart's OHLC, including synthetic bars if selected.
+// Match native chart colors manually; changing Palette styles only this table.
+// Palette references: https://rivian.com/stories/pantone-partner-rivian-green-color
+// and https://rivian.com/technology. Sampled colors are not canonical brand specifications.
+indicator("Instrument Display · Design Studies", shorttitle = "Instrument Display", overlay = true, scale = scale.none)
+
+string modeInput = input.string("Range Position", "Display mode", options = ["Range Position", "Relative Range", "Instrument"], group = "Display", display = display.none)
+string paletteInput = input.string("Ink & Paper", "Palette", options = ["Cloud & Field", "Ink & Paper", "Charging Green", "Night Expedition"], group = "Display", display = display.none)
+int headlineSizeInput = input.int(56, "Headline size (pt)", options = [36, 48, 56, 64], group = "Display", display = display.none, tooltip = "Typographic points, not CSS pixels. Use 36 or 48 for long ticker symbols or narrow charts.")
+int topInsetInput = input.int(3, "Top inset (% of chart)", minval = 0, maxval = 15, group = "Display", display = display.none)
+bool transparentInput = input.bool(false, "Transparent card", group = "Display", display = display.none, tooltip = "Off gives reliable contrast on a canvas-matched card. On allows candles behind the readout.")
+int lookbackInput = input.int(20, "Relative range lookback", minval = 2, maxval = 500, group = "Metric", display = display.none, tooltip = "Average high-low range of the previous completed chart bars. The current bar is excluded. Not ATR, a daily average, or a session metric.")
+bool descriptionInput = input.bool(true, "Short instrument description", group = "Metric", display = display.none, tooltip = "Instrument mode only. Descriptions longer than 28 characters are omitted to keep the card compact.")
+
+bool nightPalette = paletteInput == "Night Expedition"
+bool chargingPalette = paletteInput == "Charging Green"
+color canvasColor = nightPalette ? #02171C : chargingPalette ? #F2F2F2 : #F6F6F6
+color headlineColor = nightPalette ? #F6F6F6 : #101512
+color quietColor = nightPalette ? #A5B5B7 : #606060
+color goldColor = #FFAC03
+color cardColor = color.new(canvasColor, transparentInput ? 100 : 0)
+color clearColor = color.new(canvasColor, 100)
+
+// Native chart palettes (not applied by this script):
+// Cloud & Field: up #5F6559; down #DE311E; canvas #F6F6F6.
+// Ink & Paper: up fill #F6F6F6, charcoal outline/wick #101512; down #101512.
+// Charging Green: up fill #72DC57 with #5F6559 outline/wick; down #293846.
+// Night Expedition: up #84ACB3; down #FFAC03; canvas #02171C.
+
+// Compute historical functions on EVERY bar, not inside the last-bar display block.
+// [1] shifts the rolling average back one bar, excluding the current bar completely.
+// The current bar may still be forming; this ratio is not adjusted for elapsed time.
+float currentRange = high - low
+float priorAverageRange = ta.sma(high - low, lookbackInput)[1]
+float rangePosition = not na(currentRange) and currentRange > 0 and not na(close) ? math.min(100.0, math.max(0.0, 100.0 * (close - low) / currentRange)) : na
+float relativeRange = not na(currentRange) and currentRange >= 0 and not na(priorAverageRange) and priorAverageRange > 0 ? currentRange / priorAverageRange : na
+float currentBarPercent = not na(open) and open != 0 and not na(close) ? 100.0 * (close - open) / math.abs(open) : na
+
+string periodText = timeframe.isminutes ? (timeframe.multiplier % 60 == 0 ? str.tostring(timeframe.multiplier / 60, "0") + "H" : str.tostring(timeframe.multiplier) + "MIN") : timeframe.period
+string priceText = na(close) ? "N/A" : str.tostring(close, format.mintick)
+string percentSign = currentBarPercent > 0 ? "+" : ""
+string percentText = na(currentBarPercent) ? "N/A" : percentSign + str.tostring(currentBarPercent, "0.00") + "%"
+string currencyText = syminfo.currency == "" or syminfo.currency == "NONE" ? "" : " " + syminfo.currency
+
+string headerText = syminfo.ticker + "  /  " + periodText
+string headlineText = "N/A"
+string detailText = ""
+string detailTooltip = ""
+string descriptionText = ""
+
+if modeInput == "Range Position"
+    headlineText := na(rangePosition) ? "N/A" : str.tostring(rangePosition, "0") + "%"
+    detailText := "RANGE POSITION / THIS BAR"
+    detailTooltip := "Current chart bar: 100 × (close - low) / (high - low), bounded to 0-100%. 0% is the low; 100% is the high. N/A when high equals low or required data is unavailable. Not a probability or signal."
+else if modeInput == "Relative Range"
+    headlineText := na(relativeRange) ? "N/A" : str.tostring(relativeRange, "0.00") + "×"
+    detailText := "THIS RANGE / AVG " + str.tostring(lookbackInput) + " BARS"
+    detailTooltip := "Current high-low range divided by ta.sma(high - low, lookback)[1]. The denominator is the average range of the prior completed chart bars, excluding this bar. N/A until enough history exists or when the prior average is zero. This is high-low range, not true range or ATR."
+else
+    headerText := "INSTRUMENT  /  " + periodText
+    headlineText := syminfo.ticker
+    detailText := priceText + currencyText + "  /  " + percentText + " THIS BAR"
+    detailTooltip := "Latest available chart price and this bar's percentage change: 100 × (close - open) / abs(open). Not a daily or prior-close change. The percentage is N/A if open is zero or required data is unavailable."
+    descriptionText := descriptionInput and str.length(syminfo.description) <= 28 and syminfo.description != syminfo.ticker ? syminfo.description : ""
+
+// One stable top-left table; all visible cells update only on the latest chart bar.
+// The readout does not follow the crosshair. Intrabar OHLC updates can change metrics.
+var table instrumentTable = table.new(position.top_left, 1, 6, frame_width = 0, border_width = 0)
+
+if barstate.islast
+    table.cell(instrumentTable, 0, 0, "", height = topInsetInput, bgcolor = clearColor, text_size = 1)
+    table.cell(instrumentTable, 0, 1, headerText, text_color = quietColor, bgcolor = cardColor, text_size = 11, text_halign = text.align_left, text_font_family = font.family_monospace)
+    table.cell(instrumentTable, 0, 2, headlineText, text_color = headlineColor, bgcolor = cardColor, text_size = headlineSizeInput, text_halign = text.align_left, text_font_family = font.family_default, text_formatting = text.format_bold)
+    table.cell(instrumentTable, 0, 3, detailText, text_color = quietColor, bgcolor = cardColor, text_size = 11, text_halign = text.align_left, text_font_family = font.family_monospace, tooltip = detailTooltip)
+    if descriptionText != ""
+        table.cell(instrumentTable, 0, 4, descriptionText, text_color = quietColor, bgcolor = cardColor, text_size = 11, text_halign = text.align_left, text_font_family = font.family_monospace)
+    else
+        table.clear(instrumentTable, 0, 4, 0, 4)
+    table.cell(instrumentTable, 0, 5, "━━", text_color = goldColor, bgcolor = cardColor, text_size = 12, text_halign = text.align_left, text_font_family = font.family_default)
