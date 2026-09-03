@@ -1,0 +1,62 @@
+//@version=6
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Console Strip: an original Rivian-inspired composition study, not affiliated with Rivian.
+// Verified: SP_DLY:SPX 1D, 1464x681 desktop, compile/save/reload (2026-09-02).
+// Fixed layout, not responsive UI. See the packaged design notes for compact settings.
+// Same payload as Price Display; only the composition and pane placement are different.
+// Display only: no signals, alerts, orders, requests, or main-chart candle recoloring.
+// This script colors its own lower pane only. Keep it in a separate pane below the chart.
+// A user can move any script to another pane manually; do not move this one onto price.
+// Designed for a wide desktop chart and a manually resized 130-160px pane at 48pt.
+// The 56pt option may need a taller pane; 36pt helps with long prices or narrow charts.
+// Pine's scale.none requires overlay=true, so no scale argument is used here.
+// API references: https://www.tradingview.com/pine-script-docs/language/declaration-statements/
+// https://www.tradingview.com/pine-script-docs/visuals/tables/
+// https://www.tradingview.com/pine-script-docs/visuals/backgrounds/
+indicator("Console Strip · Design Study", shorttitle = "Console Strip", overlay = false)
+
+int headlineSizeInput = input.int(48, "Headline size (pt)", options = [36, 48, 56], group = "Appearance", display = display.none, tooltip = "Typographic points, not CSS pixels. Start with a 130-160px pane at 48pt. Use 36 for long prices or narrow charts; 56 may need a taller pane.")
+
+color canvasColor = #F6F6F6
+color inkColor = #101512
+color quietColor = #606060
+
+// No force-overlay output: this background belongs to the separate indicator pane.
+// The table has the same canvas color; the main chart's colors remain native settings.
+bgcolor(canvasColor, title = "Console pane background", editable = false, force_overlay = false)
+
+// These are the chart's own bar values, including synthetic OHLC on synthetic charts.
+// Data may be delayed. An unfinished bar can change with each available chart update.
+// The change is this bar's close minus its open, NOT a previous-close or daily return.
+float barChange = not na(open) and not na(close) ? close - open : na
+float barPercent = not na(open) and open != 0 and not na(close) ? 100.0 * barChange / math.abs(open) : na
+string changeSign = barChange > 0 ? "+" : ""
+string percentSign = barPercent > 0 ? "+" : ""
+string changeText = na(barChange) ? "N/A" : changeSign + str.tostring(barChange, format.mintick)
+string percentText = na(barPercent) ? "N/A" : percentSign + str.tostring(barPercent, "0.00") + "%"
+string periodText = timeframe.isminutes ? (timeframe.multiplier % 60 == 0 ? str.tostring(timeframe.multiplier / 60, "0") + "H" : str.tostring(timeframe.multiplier) + "MIN") : timeframe.period
+string currencyText = syminfo.currency == "" or syminfo.currency == "NONE" ? "" : "  /  " + syminfo.currency
+string instrumentText = syminfo.ticker + "  /  " + periodText + currencyText
+string valueText = na(close) ? "—" : str.tostring(close, format.mintick)
+string detailText = changeText + "  (" + percentText + ")"
+string changeTooltip = "THIS BAR: close minus open. Percentage = (close - open) / abs(open) × 100. Percentage is N/A for a zero open or unavailable required data. This is not a prior-close change. The readout follows the latest available chart bar, not the crosshair."
+
+// One stable, centered table. Explicit widths are percentages of the pane's visual width.
+// Content columns are 36% / 28% / 30%, with 3% empty gutters on each side.
+// The 18% caption row and 60% value row occupy 78% of pane height, leaving vertical air.
+// Native Pine tables do not measure text or wrap this strip responsively.
+var table stripTable = table.new(position.middle_center, 5, 2, bgcolor = canvasColor, frame_width = 0, border_width = 0)
+
+if barstate.islast
+    table.cell(stripTable, 0, 0, "", width = 3, height = 18, bgcolor = canvasColor, text_size = 1)
+    table.cell(stripTable, 0, 1, "", width = 3, height = 60, bgcolor = canvasColor, text_size = 1)
+    table.cell(stripTable, 1, 0, "LATEST PRICE", width = 36, height = 18, text_color = quietColor, bgcolor = canvasColor, text_size = 12, text_halign = text.align_left, text_valign = text.align_bottom, text_font_family = font.family_monospace)
+    table.cell(stripTable, 1, 1, valueText, width = 36, height = 60, text_color = inkColor, bgcolor = canvasColor, text_size = headlineSizeInput, text_halign = text.align_left, text_valign = text.align_center, text_font_family = font.family_default, text_formatting = text.format_bold, tooltip = "Latest available chart close. The feed may be delayed; synthetic charts supply synthetic prices.")
+    table.cell(stripTable, 2, 0, "INSTRUMENT / INTERVAL", width = 28, height = 18, text_color = quietColor, bgcolor = canvasColor, text_size = 12, text_halign = text.align_center, text_valign = text.align_bottom, text_font_family = font.family_monospace)
+    table.cell(stripTable, 2, 1, instrumentText, width = 28, height = 60, text_color = inkColor, bgcolor = canvasColor, text_size = 14, text_halign = text.align_center, text_valign = text.align_center, text_font_family = font.family_monospace)
+    table.cell(stripTable, 3, 0, "THIS BAR", width = 30, height = 18, text_color = quietColor, bgcolor = canvasColor, text_size = 12, text_halign = text.align_right, text_valign = text.align_bottom, text_font_family = font.family_monospace, tooltip = changeTooltip)
+    table.cell(stripTable, 3, 1, detailText, width = 30, height = 60, text_color = inkColor, bgcolor = canvasColor, text_size = 14, text_halign = text.align_right, text_valign = text.align_center, text_font_family = font.family_monospace, tooltip = changeTooltip)
+    table.cell(stripTable, 4, 0, "", width = 3, height = 18, bgcolor = canvasColor, text_size = 1)
+    table.cell(stripTable, 4, 1, "", width = 3, height = 60, bgcolor = canvasColor, text_size = 1)

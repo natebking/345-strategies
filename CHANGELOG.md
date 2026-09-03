@@ -13,6 +13,7 @@ How to read this file:
 ### Added
 
 - Standalone Price Display and experimental Instrument Display siblings, with native chart palette recipes and a design log separating tested results from candidate ideas. No TheStrat Suite engine changes. (`DISPLAY-STUDIES-1`)
+- Three composition studies holding the price payload constant: Horizon Header and Inset Panel overlays, plus a separate-pane Console Strip. Includes chart-only gallery images, native setup recipes, legibility revisions, and recorded limitations. Inset's automatic content width fixes the tested narrow-price clipping. (`DISPLAY-WIDTH-1`) Original price and content studies remain separate; no TheStrat Suite engine changes.
 
 ## [3.1.0] — 2026-08-25
 

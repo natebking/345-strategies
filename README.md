@@ -78,11 +78,13 @@ TradingView. See `invalidation-stop/README.md`.
 
 ### `price-display/` — price readout and display studies (Pine v6)
 
-Standalone chart overlays built around a large readout and small monospaced labels.
-Price Display shows the latest chart price. Instrument Display is an experimental sibling
-with range-position, relative-range, and instrument-headline modes. Neither changes candles,
-adds signals, or imports the Suite. Native palette recipes, trial results, limits, and
-unimplemented ideas are in `price-display/README.md` and `price-display/DESIGN_NOTES.md`.
+Standalone displays built around a large readout and monospaced labels. Price Display is
+the original price baseline. Instrument Display explores different content. Composition
+Overlays and Console Strip instead keep price content constant and change its arrangement:
+a distributed header, an inset dark card, or a separate lower pane. None adds signals,
+changes candle colors, or imports the Suite. Console Strip colors only its own pane in
+its default lower-pane placement. See the [gallery and setup](price-display/README.md)
+and [design log](price-display/DESIGN_NOTES.md) for recipes, trials, limits, and test status.
 
 ### `docs/`
 
