@@ -8,6 +8,12 @@ How to read this file:
 - **Every fix cites its `FIX` tag.** Grep the current source for the tag to find the exact code and the full inline rationale. Code references are function names and tags, never line numbers.
 - **Dates** come from dated `FIX` comments and file names. Where a snapshot carries no date of its own (2.2.2), the newest dated comment introduced in it is used.
 
+## [Unreleased]
+
+### Fixed
+
+- **The weekly slot no longer shows a yellow `?` during Friday pre-market.** With Preview Mode on Auto, opening a chart on Friday before the bell (SPY 1W, Sep 4 2026 07:51 ET) painted W yellow in the header, demoted the forming week into C1, and reported the week as unknown, even though Monday through Thursday had traded and Friday's session was still to come. `shouldApplyPreview` treated every Friday as part of the weekend by calendar (`differentWeek or Fri/Sat/Sun`), so the moment Auto preview armed for the closed pre-market it projected next week. The weekly test now asks the same question `shouldStraddle` does: has the served week's *scheduled close* (`time_close(tf)`) passed? Friday after the close, the weekend, and Monday before the open all sit past it, so the weekend projection is unchanged; Friday pre-market is not, so the week renders as the in-progress candle it is. Session-aware for free (16:00 ET equities, 17:00 ET futures) and immune to holiday-glued bars whose close is still ahead. Non-weekly slots are untouched. (`PREVIEW-WEEKCLOSE-1`)
+
 ## [3.1.0] — 2026-08-25
 
 Requires TheStratGrammar (TV version 1) to be published before this compiles.

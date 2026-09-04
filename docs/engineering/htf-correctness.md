@@ -101,7 +101,7 @@ Three deliberate conservatisms:
 
 ## Rule 6 — Preview mode is the same shift, armed by the market calendar
 
-The market-closed cousin of the straddle: when nothing is trading and a new calendar period has begun, `shouldApplyPreview` applies the identical promotion so traders can plan next period's levels before the open (weekly slots also preview through Fri–Sun even before the calendar week flips).
+The market-closed cousin of the straddle: when nothing is trading and a new calendar period has begun, `shouldApplyPreview` applies the identical promotion so traders can plan next period's levels before the open (a weekly slot previews once the served week's scheduled close has passed (Friday after the close through Monday's open), never during Friday's own session; `FIX PREVIEW-WEEKCLOSE-1` replaced the old "Fri/Sat/Sun by calendar" test, which fired all day Friday).
 
 Auto-detection is per asset class (`isEquityLike` / `isFuturesLike` / crypto):
 

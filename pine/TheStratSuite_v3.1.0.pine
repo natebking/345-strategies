@@ -1074,16 +1074,15 @@ shouldApplyPreview(string tf, bool previewEnabled) =>
         false
     else
         // Compare last bar's period vs current calendar period
-        // This handles: Friday EOD -> Weekend (same period), but also Jan 31 -> Feb 1 weekend (new period)
+        // Calendar TFs (M/3M/6M/12M): Jan 31 -> Feb 1 weekend is a new period even though the served
+        // bar is the old one. Weekly is judged by scheduled close instead (see PREVIEW-WEEKCLOSE-1 below).
         currentMonth = month(timenow, "America/New_York")
         currentYear = year(timenow, "America/New_York")
-        currentWeek = weekofyear(timenow, "America/New_York")
         currentQuarter = math.ceil(currentMonth / 3)
         currentSemiAnnual = currentMonth <= 6 ? 1 : 2
 
         barMonth = month(time, "America/New_York")
         barYear = year(time, "America/New_York")
-        barWeek = weekofyear(time, "America/New_York")
         barQuarter = math.ceil(barMonth / 3)
         barSemiAnnual = barMonth <= 6 ? 1 : 2
 
@@ -1094,10 +1093,18 @@ shouldApplyPreview(string tf, bool previewEnabled) =>
         isYearly = tf == "12M"
 
         if isWeekly
-            differentWeek = currentWeek != barWeek or currentYear != barYear
-            dow = dayofweek(timenow, "America/New_York")
-            isWeekend = dow == dayofweek.friday or dow == dayofweek.saturday or dow == dayofweek.sunday
-            differentWeek or isWeekend
+            // FIX PREVIEW-WEEKCLOSE-1 (2026-09-04): the weekly slot previews once the served week's
+            // SCHEDULED CLOSE has passed, not when the calendar says Friday. The old test counted all
+            // of Friday as weekend (differentWeek or Fri/Sat/Sun), so an Auto preview during Friday
+            // pre-market - market closed, but the week still has a session to trade - demoted the
+            // forming week into C1 and showed W as a yellow "?": the GLUE-1 symptom from the other
+            // direction. time_close(tf) is the week's last-session close on the symbol's own calendar
+            // (Fri 16:00 ET equities, Fri 17:00 ET futures), so it is session-aware for free, and a
+            // holiday-glued bar whose close is still ahead can never fire it (GLUE-2b). Friday after
+            // the close, the weekend, and Monday-before-open all sit past that close, so the weekend
+            // projection is unchanged and the week-number comparison is no longer needed. Same rule
+            // as shouldStraddle: staleness is judged against time_close, never the calendar.
+            shouldStraddle(tf)
         else if isYearly
             currentYear != barYear
         else if isSemiAnnual
