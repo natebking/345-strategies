@@ -1,0 +1,74 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+//@version=6
+// DISPLAY-STUDIES-1 (2026-09-02): standalone readout; no Suite engine changes.
+// Original, Rivian-inspired typography study. Not affiliated with Rivian.
+// Current palette/presentation revision saved and compiled in TradingView 2026-09-02.
+// Running display visually confirmed: latest price, no NONE currency, short gold rule.
+// Display only: no signals, alerts, orders, external data requests, or chart recoloring.
+// Match the native chart palette manually; this indicator styles only its table.
+// Cloud & Field #5F6559: sampled digital swatch, not a canonical Pantone/sRGB spec.
+// Source: https://rivian.com/stories/pantone-partner-rivian-green-color
+// Charging Green #72DC57: approximate dominant green in the official app image.
+// Source: https://rivian.com/technology (App - Charging image)
+// Bright charging bodies need dark #5F6559 borders/wicks on a light canvas.
+indicator("Rivian-inspired Price Display", shorttitle = "Price Display", overlay = true, scale = scale.none)
+
+string themeInput = input.string("Cloud & Field", "Palette", options = ["Cloud & Field", "Ink & Paper", "Charging Green", "Night Expedition"], group = "Appearance", display = display.none)
+int headlineSizeInput = input.int(56, "Headline size (pt)", options = [36, 48, 56, 64], group = "Appearance", display = display.none, tooltip = "Pine uses typographic points, not CSS pixels. Use 36 or 48 for long prices or narrow charts.")
+bool transparentInput = input.bool(false, "Transparent card", group = "Appearance", display = display.none, tooltip = "Off: the card matches the selected palette's canvas. On: candles can show behind the text.")
+bool showLegendInput = input.bool(false, "Show palette key", group = "Appearance", display = display.none)
+int topInsetInput = input.int(3, "Top inset (% of chart)", minval = 0, maxval = 15, group = "Appearance", display = display.none, tooltip = "Leaves room for the chart's native status line. The display remains at the top left, away from the newest bars.")
+
+bool nightTheme = themeInput == "Night Expedition"
+bool inkTheme = themeInput == "Ink & Paper"
+bool chargingTheme = themeInput == "Charging Green"
+
+color canvasColor = nightTheme ? #02171C : chargingTheme ? #F2F2F2 : #F6F6F6
+color headlineColor = nightTheme ? #F6F6F6 : #101512
+color quietColor = nightTheme ? #A5B5B7 : #606060
+color upColor = nightTheme ? #84ACB3 : inkTheme ? #101512 : chargingTheme ? #72DC57 : #5F6559
+color downColor = nightTheme ? #FFAC03 : inkTheme ? #101512 : chargingTheme ? #293846 : #DE311E
+color blueColor = #1676CA
+color yellowColor = #FFAC03
+color cardColor = color.new(canvasColor, transparentInput ? 100 : 0)
+color clearColor = color.new(canvasColor, 100)
+
+// These values come from the chart's own bars, including synthetic bars if selected.
+// The percentage is relative to THIS bar's open, not the prior close or daily change.
+float barChange = close - open
+float barPercent = not na(open) and open != 0 ? 100.0 * barChange / math.abs(open) : na
+string changeSign = barChange > 0 ? "+" : ""
+string percentSign = barPercent > 0 ? "+" : ""
+string changeText = na(barChange) ? "N/A" : changeSign + str.tostring(barChange, format.mintick)
+string percentText = na(barPercent) ? "N/A" : percentSign + str.tostring(barPercent, "0.00") + "%"
+string periodText = timeframe.isminutes ? (timeframe.multiplier % 60 == 0 ? str.tostring(timeframe.multiplier / 60, "0") + "H" : str.tostring(timeframe.multiplier) + "MIN") : timeframe.period
+string currencyText = syminfo.currency == "" or syminfo.currency == "NONE" ? "" : "  /  " + syminfo.currency
+string headingText = syminfo.ticker + "  /  " + periodText + currencyText
+string valueText = na(close) ? "—" : str.tostring(close, format.mintick)
+string detailText = changeText + "  (" + percentText + ")  /  THIS BAR"
+
+// Automatic cell width keeps the display compact rather than spanning the chart.
+var table displayTable = table.new(position.top_left, 4, 6, frame_width = 0, border_width = 0)
+
+if barstate.isfirst
+    table.merge_cells(displayTable, 0, 0, 3, 0)
+    table.merge_cells(displayTable, 0, 1, 3, 1)
+    table.merge_cells(displayTable, 0, 2, 3, 2)
+    table.merge_cells(displayTable, 0, 3, 3, 3)
+    table.merge_cells(displayTable, 0, 4, 3, 4)
+
+if barstate.islast
+    table.cell(displayTable, 0, 0, "", height = topInsetInput, bgcolor = clearColor, text_size = 1)
+    table.cell(displayTable, 0, 1, headingText, text_color = quietColor, bgcolor = cardColor, text_size = 11, text_halign = text.align_left, text_font_family = font.family_monospace)
+    table.cell(displayTable, 0, 2, valueText, text_color = headlineColor, bgcolor = cardColor, text_size = headlineSizeInput, text_halign = text.align_left, text_font_family = font.family_default, text_formatting = text.format_bold)
+    table.cell(displayTable, 0, 3, detailText, text_color = quietColor, bgcolor = cardColor, text_size = 11, text_halign = text.align_left, text_font_family = font.family_monospace, tooltip = "Current chart bar: close minus open. Percentage = (close - open) / abs(open) × 100. This is not a daily or prior-close change. Values follow the latest available chart update, not the crosshair.")
+    table.cell(displayTable, 0, 4, showLegendInput ? "" : "━━", height = showLegendInput ? 0.7 : 0, text_color = yellowColor, bgcolor = cardColor, text_size = showLegendInput ? 1 : 12, text_halign = text.align_left, text_font_family = font.family_default)
+    if showLegendInput
+        table.cell(displayTable, 0, 5, inkTheme ? " ○ UP " : " UP ", text_color = nightTheme or inkTheme or chargingTheme ? #101512 : #FFFFFF, bgcolor = inkTheme ? canvasColor : upColor, text_size = 9, text_font_family = font.family_monospace, tooltip = inkTheme ? "Up candles: canvas-colored bodies with charcoal borders and wicks." : chargingTheme ? "Charging-green bodies with dark #5F6559 borders and wicks. Apply manually in native chart settings." : "Suggested up color. Apply it manually in native chart settings; this display does not recolor candles.")
+        table.cell(displayTable, 1, 5, " DOWN ", text_color = nightTheme ? #101512 : #FFFFFF, bgcolor = downColor, text_size = 9, text_font_family = font.family_monospace, tooltip = "Suggested down color. Apply it manually in native chart settings; this display does not recolor candles.")
+        table.cell(displayTable, 2, 5, " BLUE ", text_color = #FFFFFF, bgcolor = blueColor, text_size = 9, text_font_family = font.family_monospace, tooltip = "Accent blue: #1676CA")
+        table.cell(displayTable, 3, 5, " GOLD ", text_color = #101512, bgcolor = yellowColor, text_size = 9, text_font_family = font.family_monospace, tooltip = "Accent yellow: #FFAC03")
+    else
+        table.clear(displayTable, 0, 5, 3, 5)

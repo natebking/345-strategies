@@ -79,6 +79,17 @@ it to the other side; a session reset re-seeds it at the open, at the gap-fill l
 gap. Forked from the Classic path of my invalidation stop work. Not published on
 TradingView. See `invalidation-stop/README.md`.
 
+### `price-display/` — Automotive Display Studio and design studies (Pine v6)
+
+`display_studio.pine` consolidates the work into one main-chart indicator: four readouts
+(price, range position, relative range, and instrument) combine independently with four
+layouts (classic card, distributed header, inset panel, and bottom rail). Four coordinated
+themes can also draw the chart canvas and an OHLC candle layer. The earlier single-purpose
+sources remain as the research record, including Console Strip when the footer must occupy a
+true separate pane. None adds signals, alerts, orders, external data requests, or Suite
+dependencies. See the [setup and gallery](price-display/README.md), [design log](price-display/DESIGN_NOTES.md),
+and [publication packet](price-display/PUBLISHING.md) for the verification gate and ready description.
+
 ### `docs/`
 
 Start at `docs/README.md` (the index). Trader-facing docs live in `docs/concepts/`, engineering docs in `docs/engineering/`. Highlights:

@@ -8,6 +8,14 @@ How to read this file:
 - **Every fix cites its `FIX` tag.** Grep the current source for the tag to find the exact code and the full inline rationale. Code references are function names and tags, never line numbers.
 - **Dates** come from dated `FIX` comments and file names. Where a snapshot carries no date of its own (2.2.2), the newest dated comment introduced in it is used.
 
+## [Unreleased]
+
+### Added
+
+- Automotive Display Studio consolidates the display work into one publication candidate with independent Readout and Layout controls (four of each), four coordinated themes, accent overrides, and optional main-chart canvas/candles. Its Bottom Rail brings the footer composition into the single overlay; the real separate-pane Console remains a documented companion because a main-chart script cannot create a pane only when that input is selected. Includes a self-contained publishing packet, pairwise release gate, and a dated decision log distinguishing static review from the still-required TradingView runtime pass. No TheStrat Suite engine changes. (`DISPLAY-STUDIO-1`)
+- Standalone Price Display and experimental Instrument Display siblings, with native chart palette recipes and a design log separating tested results from candidate ideas. No TheStrat Suite engine changes. (`DISPLAY-STUDIES-1`)
+- Three composition studies holding the price payload constant: Horizon Header and Inset Panel overlays, plus a separate-pane Console Strip. Includes chart-only gallery images, native setup recipes, legibility revisions, and recorded limitations. Inset's automatic content width fixes the tested narrow-price clipping. (`DISPLAY-WIDTH-1`) Original price and content studies remain separate; no TheStrat Suite engine changes.
+
 ## [3.1.1] — 2026-09-10
 
 Requires TheStratGrammar (TV version 1). Source: `pine/TheStratSuite_v3.1.1.pine`. Seven fixes to the preview path, found after a Friday pre-market report on SPY and a follow-up scan; details in each entry.

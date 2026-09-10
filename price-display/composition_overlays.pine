@@ -1,0 +1,75 @@
+//@version=6
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Original composition studies inspired by Rivian's visual hierarchy. No affiliation.
+// Verified: SP_DLY:SPX 1D, 1464x681 desktop, compile/save/reload (2026-09-02).
+// Fixed layouts, not responsive UI. See the packaged design notes for compact settings.
+// Both compositions hold content constant: instrument, chart timeframe, currency,
+// latest chart price, and this chart bar's absolute/percentage open-to-close change.
+// Display only. No signals, alerts, orders, external data requests, or chart recoloring.
+// Native setup: light #F6F6F6 canvas; reserve approximately 25% top chart margin.
+// Table dimensions are percentages of the available chart pane, not CSS pixels.
+indicator("Composition Overlays · Design Studies", shorttitle = "Composition Studies", overlay = true, scale = scale.none)
+
+string compositionInput = input.string("Horizon Header", "Composition", options = ["Horizon Header", "Inset Panel"], group = "Composition", display = display.none)
+int headlineSizeInput = input.int(56, "Headline size (pt)", options = [36, 48, 56, 64], group = "Composition", display = display.none, tooltip = "Typographic points, not CSS pixels. Use 36 or 48 if a long price or narrow chart exceeds its column.")
+int topInsetInput = input.int(3, "Top inset (% of chart)", minval = 0, maxval = 15, group = "Composition", display = display.none, tooltip = "Space above the composition. Reserve chart space separately with native top margin, approximately 25% for these studies.")
+
+bool horizonComposition = compositionInput == "Horizon Header"
+color paperColor = #F6F6F6
+color inkColor = #101512
+color quietColor = #606060
+color dividerColor = #D8DDD8
+color panelColor = #02171C
+color panelQuietColor = #A5B5B7
+color goldColor = #FFAC03
+color clearColor = color.new(paperColor, 100)
+
+// Identical value definitions to the original price readout. Synthetic chart types
+// supply synthetic OHLC. Values follow the latest available chart update, not the cursor.
+float barChange = close - open
+float barPercent = not na(open) and open != 0 ? 100.0 * barChange / math.abs(open) : na
+string changeSign = barChange > 0 ? "+" : ""
+string percentSign = barPercent > 0 ? "+" : ""
+string changeText = na(barChange) ? "N/A" : changeSign + str.tostring(barChange, format.mintick)
+string percentText = na(barPercent) ? "N/A" : percentSign + str.tostring(barPercent, "0.00") + "%"
+string periodText = timeframe.isminutes ? (timeframe.multiplier % 60 == 0 ? str.tostring(timeframe.multiplier / 60, "0") + "H" : str.tostring(timeframe.multiplier) + "MIN") : timeframe.period
+string currencyText = syminfo.currency == "" or syminfo.currency == "NONE" ? "" : "  /  " + syminfo.currency
+string headingText = syminfo.ticker + "  /  " + periodText + currencyText
+string valueText = na(close) ? "—" : str.tostring(close, format.mintick)
+string detailText = changeText + "  (" + percentText + ")"
+string detailTooltip = "Current chart bar: close minus open. Percentage = 100 × (close - open) / abs(open). Not a daily or prior-close change. A zero or unavailable open gives N/A percentage. Data may be delayed and current-bar values can change intrabar."
+
+// One table is constructed once for the selected input. Changing an input restarts
+// the script, so there is no inactive-table pool or per-tick object creation/deletion.
+var table compositionTable = table.new(horizonComposition ? position.top_center : position.top_left, 5, horizonComposition ? 4 : 6, frame_width = 0, border_width = 0)
+
+if barstate.islast
+    if horizonComposition
+        // Full-pane distributed header: 4% gutter, 25% identity, 42% price,
+        // 25% change, 4% gutter. Main-row height follows its largest text.
+        for column = 0 to 4
+            float columnWidth = column == 0 or column == 4 ? 4.0 : column == 2 ? 42.0 : 25.0
+            table.cell(compositionTable, column, 0, "", width = columnWidth, height = topInsetInput, bgcolor = paperColor, text_size = 1)
+            table.cell(compositionTable, column, 1, "", width = columnWidth, bgcolor = paperColor, text_size = 1)
+            table.cell(compositionTable, column, 2, "", width = columnWidth, height = 1.5, bgcolor = paperColor, text_size = 1)
+            table.cell(compositionTable, column, 3, "", width = columnWidth, height = 0.2, bgcolor = dividerColor, text_size = 1)
+        table.cell(compositionTable, 1, 1, syminfo.ticker + "\n" + periodText + currencyText, width = 25, text_color = quietColor, bgcolor = paperColor, text_size = 14, text_halign = text.align_left, text_valign = text.align_center, text_font_family = font.family_monospace)
+        table.cell(compositionTable, 2, 1, valueText, width = 42, text_color = inkColor, bgcolor = paperColor, text_size = headlineSizeInput, text_halign = text.align_center, text_valign = text.align_center, text_font_family = font.family_default, text_formatting = text.format_bold)
+        table.cell(compositionTable, 3, 1, detailText + "\nTHIS BAR", width = 25, text_color = quietColor, bgcolor = paperColor, text_size = 14, text_halign = text.align_right, text_valign = text.align_center, text_font_family = font.family_monospace, tooltip = detailTooltip)
+    else
+        // FIX DISPLAY-WIDTH-1 (2026-09-02): size inset content to its text;
+        // a fixed 27% column clipped the price in a narrow desktop window.
+        // Clear outer gutter: 2%; gold edge: 0.25%; inner padding: 1.25% per side.
+        // Extremely long text can still exceed a narrow pane. No rounded corners.
+        for column = 0 to 4
+            float columnWidth = column == 0 ? 2.0 : column == 1 ? 0.25 : column == 3 ? 0.0 : 1.25
+            color cellColor = column == 0 ? clearColor : column == 1 ? goldColor : panelColor
+            table.cell(compositionTable, column, 0, "", width = columnWidth, height = topInsetInput, bgcolor = clearColor, text_size = 1)
+            for row = 1 to 5
+                float rowHeight = row == 1 or row == 5 ? 1.5 : 0.0
+                table.cell(compositionTable, column, row, "", width = columnWidth, height = rowHeight, bgcolor = cellColor, text_size = 1)
+        table.cell(compositionTable, 3, 2, headingText, text_color = panelQuietColor, bgcolor = panelColor, text_size = 12, text_halign = text.align_left, text_font_family = font.family_monospace)
+        table.cell(compositionTable, 3, 3, valueText, text_color = paperColor, bgcolor = panelColor, text_size = headlineSizeInput, text_halign = text.align_left, text_font_family = font.family_default, text_formatting = text.format_bold)
+        table.cell(compositionTable, 3, 4, detailText + "\nTHIS BAR", text_color = panelQuietColor, bgcolor = panelColor, text_size = 12, text_halign = text.align_left, text_font_family = font.family_monospace, tooltip = detailTooltip)

@@ -1,0 +1,179 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Copyright (c) 2026 Nate King
+//@version=6
+// DISPLAY-STUDIO-1 (2026-09-10): one original automotive-display system.
+// The Readout and Layout inputs are independent, yielding sixteen compositions.
+// Display only: no signals, alerts, orders, or external data requests.
+// Values use the chart's own OHLC and update with the latest available chart bar.
+// The table is fixed to the pane, does not follow the cursor, and is not responsive UI.
+indicator("Automotive Display Studio", shorttitle = "Display Studio", overlay = true, scale = scale.none, behind_chart = false)
+
+const string GROUP_CONTENT = "Content"
+const string GROUP_COMPOSITION = "Composition"
+const string GROUP_APPEARANCE = "Appearance"
+const string GROUP_CHART = "Chart treatment"
+
+string readoutInput = input.string("Price", "Readout", options = ["Price", "Range Position", "Relative Range", "Instrument"], group = GROUP_CONTENT, display = display.none)
+int lookbackInput = input.int(20, "Relative range lookback", minval = 2, maxval = 500, group = GROUP_CONTENT, display = display.none, tooltip = "Average high-low range of the previous completed chart bars. The current bar is excluded. This is not ATR.")
+bool showDescriptionInput = input.bool(true, "Short instrument description", group = GROUP_CONTENT, display = display.none, tooltip = "Instrument readout only. Descriptions longer than 28 characters are omitted to preserve the composition.")
+
+string layoutInput = input.string("Classic Card", "Layout", options = ["Classic Card", "Horizon Header", "Inset Panel", "Bottom Rail"], group = GROUP_COMPOSITION, display = display.none)
+int headlineSizeInput = input.int(56, "Headline size (pt)", options = [36, 48, 56, 64], group = GROUP_COMPOSITION, display = display.none, tooltip = "Pine uses typographic points, not CSS pixels. Use 36 or 48 for long values or narrow charts.")
+int topInsetInput = input.int(3, "Top inset (% of chart)", minval = 0, maxval = 15, group = GROUP_COMPOSITION, display = display.none, tooltip = "Applies to the three top-anchored layouts. Reserve chart margin separately when necessary. Bottom Rail ignores this setting.")
+
+string themeInput = input.string("Ink", "Theme", options = ["Ink", "Field", "Charge", "Night"], group = GROUP_APPEARANCE, display = display.none)
+string accentInput = input.string("Theme", "Accent", options = ["Theme", "Blue", "Gold", "Green"], group = GROUP_APPEARANCE, display = display.none)
+bool transparentCardInput = input.bool(false, "Transparent classic card", group = GROUP_APPEARANCE, display = display.none, tooltip = "Classic Card only. Opaque gives reliable contrast; transparent allows chart marks behind the readout.")
+
+bool applyCanvasInput = input.bool(true, "Apply theme canvas", group = GROUP_CHART, display = display.none, tooltip = "Colors the main chart pane across loaded bars. It is independent of themed candles; match the native canvas separately for a seamless right margin and surrounding interface.")
+bool drawCandlesInput = input.bool(true, "Draw themed candles", group = GROUP_CHART, display = display.none, tooltip = "Draws a second candle layer in front of the native series using the selected theme. Turn off to keep native candle styling. Synthetic chart types supply synthetic OHLC.")
+
+bool inkTheme = themeInput == "Ink"
+bool fieldTheme = themeInput == "Field"
+bool chargeTheme = themeInput == "Charge"
+bool nightTheme = themeInput == "Night"
+
+color canvasColor = nightTheme ? #02171C : chargeTheme ? #F2F2F2 : #F6F6F6
+color headlineColor = nightTheme ? #F6F6F6 : #101512
+color quietColor = nightTheme ? #A5B5B7 : #606060
+color dividerColor = nightTheme ? #293846 : #D8DDD8
+color upBodyColor = nightTheme ? #84ACB3 : inkTheme ? #F6F6F6 : chargeTheme ? #72DC57 : #5F6559
+color upEdgeColor = nightTheme ? #84ACB3 : inkTheme ? #101512 : chargeTheme ? #5F6559 : #5F6559
+color downColor = nightTheme ? #FFAC03 : inkTheme ? #101512 : chargeTheme ? #293846 : #DE311E
+color themeAccentColor = chargeTheme ? #72DC57 : fieldTheme ? #5F6559 : #FFAC03
+color accentColor = accentInput == "Blue" ? #1676CA : accentInput == "Gold" ? #FFAC03 : accentInput == "Green" ? #72DC57 : themeAccentColor
+color panelColor = fieldTheme ? #5F6559 : chargeTheme or nightTheme ? #293846 : #02171C
+color panelHeadlineColor = #F6F6F6
+color panelQuietColor = fieldTheme ? #F6F6F6 : #A5B5B7
+color panelAccentColor = accentInput == "Theme" and fieldTheme ? #FFAC03 : accentColor
+color cardColor = color.new(canvasColor, transparentCardInput ? 100 : 0)
+color clearColor = color.new(canvasColor, 100)
+
+// Optional chart treatment. Theme candles sit in front of the native price series.
+// Ink deliberately uses canvas-colored up bodies with dark outlines for the hollow look.
+color chartCanvasColor = applyCanvasInput ? canvasColor : na
+bool upBar = not na(open) and not na(close) and close >= open
+color candleBodyColor = upBar ? upBodyColor : downColor
+color candleEdgeColor = upBar ? upEdgeColor : downColor
+bgcolor(chartCanvasColor, title = "Studio canvas", editable = false, force_overlay = true)
+plotcandle(drawCandlesInput ? open : na, drawCandlesInput ? high : na, drawCandlesInput ? low : na, drawCandlesInput ? close : na, title = "Studio candles", color = candleBodyColor, wickcolor = candleEdgeColor, bordercolor = candleEdgeColor, editable = false, display = display.pane, force_overlay = true)
+
+// Calculate history-dependent values on every bar, outside the last-bar table block.
+float barChange = not na(open) and not na(close) ? close - open : na
+float barPercent = not na(open) and open != 0 and not na(close) ? 100.0 * barChange / math.abs(open) : na
+float currentRange = not na(high) and not na(low) ? high - low : na
+float priorAverageRange = ta.sma(high - low, lookbackInput)[1]
+float rangePosition = not na(currentRange) and currentRange > 0 and not na(close) ? math.min(100.0, math.max(0.0, 100.0 * (close - low) / currentRange)) : na
+float relativeRange = not na(currentRange) and currentRange >= 0 and not na(priorAverageRange) and priorAverageRange > 0 ? currentRange / priorAverageRange : na
+
+string changeSign = not na(barChange) and barChange > 0 ? "+" : ""
+string percentSign = not na(barPercent) and barPercent > 0 ? "+" : ""
+string changeText = na(barChange) ? "N/A" : changeSign + str.tostring(barChange, format.mintick)
+string percentText = na(barPercent) ? "N/A" : percentSign + str.tostring(barPercent, "0.00") + "%"
+string priceText = na(close) ? "N/A" : str.tostring(close, format.mintick)
+string periodText = timeframe.isminutes ? (timeframe.multiplier % 60 == 0 ? str.tostring(timeframe.multiplier / 60, "0") + "H" : str.tostring(timeframe.multiplier) + "MIN") : timeframe.period
+string currencyInline = syminfo.currency == "" or syminfo.currency == "NONE" ? "" : " / " + syminfo.currency
+string instrumentText = syminfo.ticker + " / " + periodText + currencyInline
+
+string eyebrowText = instrumentText
+string headlineText = priceText
+string detailText = changeText + "  (" + percentText + ")  /  THIS BAR"
+string detailTooltip = "Latest chart close and this bar's movement: close minus open; percentage = 100 * (close - open) / abs(open). This is not a previous-close or daily change. A zero or unavailable open gives N/A."
+string descriptionText = ""
+string horizonLeftText = syminfo.ticker + "\n" + periodText + currencyInline
+string horizonRightText = changeText + "  (" + percentText + ")\nTHIS BAR"
+string railLeftCaption = "LATEST PRICE"
+string railCenterCaption = "INSTRUMENT / INTERVAL"
+string railCenterText = instrumentText
+string railRightCaption = "THIS BAR"
+string railRightText = changeText + "  (" + percentText + ")"
+
+if readoutInput == "Range Position"
+    headlineText := na(rangePosition) ? "N/A" : str.tostring(rangePosition, "0") + "%"
+    detailText := "RANGE POSITION  /  THIS BAR"
+    detailTooltip := "Position of the close inside this chart bar: 100 * (close - low) / (high - low), bounded to 0-100%. N/A when high equals low or required data is unavailable. This is not a probability or signal."
+    horizonRightText := "RANGE POSITION\nTHIS BAR"
+    railLeftCaption := "RANGE POSITION"
+    railRightCaption := "CONTEXT"
+    railRightText := "LOW 0  /  HIGH 100"
+else if readoutInput == "Relative Range"
+    headlineText := na(relativeRange) ? "N/A" : str.tostring(relativeRange, "0.00") + "x"
+    detailText := "THIS RANGE  /  AVG " + str.tostring(lookbackInput) + " BARS"
+    detailTooltip := "Current high-low range divided by ta.sma(high - low, lookback)[1]. The average uses prior completed chart bars and excludes this bar. N/A until enough history exists or when the prior average is zero. This is not true range or ATR."
+    horizonRightText := "CURRENT / PRIOR\n" + str.tostring(lookbackInput) + " BAR AVG"
+    railLeftCaption := "RELATIVE RANGE"
+    railRightCaption := "CONTEXT"
+    railRightText := "THIS  /  AVG " + str.tostring(lookbackInput)
+else if readoutInput == "Instrument"
+    eyebrowText := "INSTRUMENT  /  " + periodText
+    headlineText := syminfo.ticker
+    detailText := priceText + currencyInline + "  /  " + percentText + " THIS BAR"
+    detailTooltip := "Instrument identity, latest chart close, and this bar's percentage change: 100 * (close - open) / abs(open). Not a daily or previous-close change."
+    descriptionText := showDescriptionInput and syminfo.description != syminfo.ticker and str.length(syminfo.description) <= 28 ? syminfo.description : ""
+    horizonLeftText := "INSTRUMENT\n" + periodText + currencyInline
+    horizonRightText := priceText + currencyInline + "\n" + percentText + " THIS BAR"
+    railLeftCaption := "INSTRUMENT"
+    railCenterCaption := "INTERVAL / CURRENCY"
+    railCenterText := periodText + currencyInline
+    railRightCaption := "PRICE / THIS BAR"
+    railRightText := priceText + currencyInline + "  /  " + percentText
+
+bool classicLayout = layoutInput == "Classic Card"
+bool horizonLayout = layoutInput == "Horizon Header"
+bool insetLayout = layoutInput == "Inset Panel"
+string studioPosition = horizonLayout ? position.top_center : layoutInput == "Bottom Rail" ? position.bottom_center : position.top_left
+int studioColumns = classicLayout ? 1 : 5
+int studioRows = classicLayout ? 6 : horizonLayout ? 4 : insetLayout ? 6 : 2
+
+// Inputs trigger a full script reload, so one mode-sized table is created once.
+// This avoids pools of inactive tables and overlapping anchors.
+var table studioTable = table.new(studioPosition, studioColumns, studioRows, frame_width = 0, border_width = 0)
+
+if barstate.islast
+    if classicLayout
+        bool hasDescription = descriptionText != ""
+        table.cell(studioTable, 0, 0, "", height = topInsetInput, bgcolor = clearColor, text_size = 1)
+        table.cell(studioTable, 0, 1, eyebrowText, text_color = quietColor, bgcolor = cardColor, text_size = 11, text_halign = text.align_left, text_font_family = font.family_monospace)
+        table.cell(studioTable, 0, 2, headlineText, text_color = headlineColor, bgcolor = cardColor, text_size = headlineSizeInput, text_halign = text.align_left, text_font_family = font.family_default, text_formatting = text.format_bold, tooltip = detailTooltip)
+        table.cell(studioTable, 0, 3, detailText, text_color = quietColor, bgcolor = cardColor, text_size = 11, text_halign = text.align_left, text_font_family = font.family_monospace, tooltip = detailTooltip)
+        table.cell(studioTable, 0, 4, hasDescription ? descriptionText : "━━", text_color = hasDescription ? quietColor : accentColor, bgcolor = cardColor, text_size = hasDescription ? 11 : 12, text_halign = text.align_left, text_font_family = hasDescription ? font.family_monospace : font.family_default)
+        table.cell(studioTable, 0, 5, hasDescription ? "━━" : "", text_color = accentColor, bgcolor = cardColor, text_size = 12, text_halign = text.align_left, text_font_family = font.family_default)
+    else if horizonLayout
+        for column = 0 to 4
+            float columnWidth = column == 0 or column == 4 ? 4.0 : column == 2 ? 42.0 : 25.0
+            color ruleColor = column == 0 ? accentColor : dividerColor
+            table.cell(studioTable, column, 0, "", width = columnWidth, height = topInsetInput, bgcolor = canvasColor, text_size = 1)
+            table.cell(studioTable, column, 1, "", width = columnWidth, bgcolor = canvasColor, text_size = 1)
+            table.cell(studioTable, column, 2, "", width = columnWidth, height = 1.5, bgcolor = canvasColor, text_size = 1)
+            table.cell(studioTable, column, 3, "", width = columnWidth, height = 0.2, bgcolor = ruleColor, text_size = 1)
+        table.cell(studioTable, 1, 1, horizonLeftText, width = 25, text_color = quietColor, bgcolor = canvasColor, text_size = 14, text_halign = text.align_left, text_valign = text.align_center, text_font_family = font.family_monospace)
+        table.cell(studioTable, 2, 1, headlineText, width = 42, text_color = headlineColor, bgcolor = canvasColor, text_size = headlineSizeInput, text_halign = text.align_center, text_valign = text.align_center, text_font_family = font.family_default, text_formatting = text.format_bold, tooltip = detailTooltip)
+        table.cell(studioTable, 3, 1, horizonRightText, width = 25, text_color = quietColor, bgcolor = canvasColor, text_size = 14, text_halign = text.align_right, text_valign = text.align_center, text_font_family = font.family_monospace, tooltip = detailTooltip)
+    else if insetLayout
+        for column = 0 to 4
+            color structuralColor = column == 0 ? clearColor : column == 1 ? panelAccentColor : panelColor
+            table.cell(studioTable, column, 0, "", height = topInsetInput, bgcolor = clearColor, text_size = 1)
+            for row = 1 to 5
+                float rowHeight = row == 1 or row == 5 ? 1.5 : 0.0
+                if column == 3
+                    table.cell(studioTable, column, row, "", height = rowHeight, bgcolor = structuralColor, text_size = 1)
+                else
+                    float columnWidth = column == 0 ? 2.0 : column == 1 ? 0.25 : 1.25
+                    table.cell(studioTable, column, row, "", width = columnWidth, height = rowHeight, bgcolor = structuralColor, text_size = 1)
+        string insetDetailText = descriptionText == "" ? detailText : detailText + "\n" + descriptionText
+        table.cell(studioTable, 3, 2, eyebrowText, text_color = panelQuietColor, bgcolor = panelColor, text_size = 12, text_halign = text.align_left, text_font_family = font.family_monospace)
+        table.cell(studioTable, 3, 3, headlineText, text_color = panelHeadlineColor, bgcolor = panelColor, text_size = headlineSizeInput, text_halign = text.align_left, text_font_family = font.family_default, text_formatting = text.format_bold, tooltip = detailTooltip)
+        table.cell(studioTable, 3, 4, insetDetailText, text_color = panelQuietColor, bgcolor = panelColor, text_size = 12, text_halign = text.align_left, text_font_family = font.family_monospace, tooltip = detailTooltip)
+    else
+        for column = 0 to 4
+            float columnWidth = column == 0 or column == 4 ? 3.0 : column == 1 ? 36.0 : column == 2 ? 28.0 : 30.0
+            table.cell(studioTable, column, 0, "", width = columnWidth, height = 4, bgcolor = canvasColor, text_size = 1)
+            table.cell(studioTable, column, 1, "", width = columnWidth, height = 14, bgcolor = canvasColor, text_size = 1)
+        table.cell(studioTable, 1, 0, railLeftCaption, width = 36, height = 4, text_color = quietColor, bgcolor = canvasColor, text_size = 12, text_halign = text.align_left, text_valign = text.align_bottom, text_font_family = font.family_monospace)
+        table.cell(studioTable, 1, 1, headlineText, width = 36, height = 14, text_color = headlineColor, bgcolor = canvasColor, text_size = headlineSizeInput, text_halign = text.align_left, text_valign = text.align_center, text_font_family = font.family_default, text_formatting = text.format_bold, tooltip = detailTooltip)
+        table.cell(studioTable, 2, 0, railCenterCaption, width = 28, height = 4, text_color = quietColor, bgcolor = canvasColor, text_size = 12, text_halign = text.align_center, text_valign = text.align_bottom, text_font_family = font.family_monospace)
+        table.cell(studioTable, 2, 1, railCenterText, width = 28, height = 14, text_color = headlineColor, bgcolor = canvasColor, text_size = 14, text_halign = text.align_center, text_valign = text.align_center, text_font_family = font.family_monospace)
+        table.cell(studioTable, 3, 0, railRightCaption, width = 30, height = 4, text_color = quietColor, bgcolor = canvasColor, text_size = 12, text_halign = text.align_right, text_valign = text.align_bottom, text_font_family = font.family_monospace, tooltip = detailTooltip)
+        table.cell(studioTable, 3, 1, railRightText, width = 30, height = 14, text_color = headlineColor, bgcolor = canvasColor, text_size = 14, text_halign = text.align_right, text_valign = text.align_center, text_font_family = font.family_monospace, tooltip = detailTooltip)
