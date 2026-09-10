@@ -2,7 +2,7 @@
 
 How the Suite turns resolved signal state into chart objects — anchoring, object lifetimes, the label pool, and the consolidation passes — inside TradingView's drawing-object limits and without breaking the no-repaint contract.
 
-Written against `pine/TheStratSuite_v3.1.0.pine`. Code references are function names and `FIX` tags; grep the source for them. This doc covers *how* drawing executes; *which* levels qualify to draw is decision logic, covered in `drawing-decisions.md`. Repaint fundamentals live in `repaint-prevention.md`; this doc assumes them.
+Written against `pine/TheStratSuite_v3.1.1.pine`. Code references are function names and `FIX` tags; grep the source for them. This doc covers *how* drawing executes; *which* levels qualify to draw is decision logic, covered in `drawing-decisions.md`. Repaint fundamentals live in `repaint-prevention.md`; this doc assumes them.
 
 ---
 
@@ -46,7 +46,7 @@ Two invariants fall out of this ordering:
 Every line and box uses `xloc.bar_time` (`updateOrCreateLine`, `updateOrCreateBox`). Two reasons:
 
 1. **HTF geometry doesn't live on chart bars.** A weekly level's start is the weekly period's open timestamp, which need not coincide with any chart bar's index — and must land in the same place on a 15m chart and a 4H chart.
-2. **The right edge is in the future.** Lines extend to `lineEndTime = raw.ccTime + periodDuration` — the current HTF period's projected close. `xloc.bar_time` accepts future timestamps freely; `xloc.bar_index` is capped a few hundred bars ahead.
+2. **The right edge is in the future.** Lines and boxes extend to `lineEndTime = max(raw.ccTime + periodDuration, time_close(tf))` for non-preview slots (`FIX LINEEND-CLOSE-1`, computed in `computeSignalState` and again in the render loop); preview slots keep `raw.ccTime + periodDuration`, because their `ccTime` is the chart bar and their served close belongs to the stale period, so the scheduled close would shorten the projection. `xloc.bar_time` accepts future timestamps freely; `xloc.bar_index` is capped a few hundred bars ahead.
 
 Every line is horizontal — `y1 == y2 ==` the level price. The x-anchors per level:
 
@@ -58,7 +58,7 @@ Every line is horizontal — `y1 == y2 ==` the level price. The x-anchors per le
 | Open, stops, F2 open | `r.ccStartTime` (CC period open) | open / locked stop / CC open |
 | Take Action Window boxes | `data.prevTime` → `lineEndTime` | trigger ↔ magnitude (or exhaustion); P3 windows span trigger ↔ trigger |
 
-One honest caveat: `periodDuration` is `timeframe.in_seconds(tf) * 1000`, a fixed-duration approximation — a month is not a constant number of seconds, and session gaps are not modeled. The right edge is cosmetic. **Only the y (the price) is load-bearing**; nothing computes off a line's x2.
+One honest caveat: `periodDuration` is `timeframe.in_seconds(tf) * 1000`, a nominal period — a month is not a constant number of seconds, and session gaps are not modeled. `FIX LINEEND-CLOSE-1` covers the cases where that falls short (31-day months, holiday-glued futures sessions) by taking the scheduled close when it is later. The right edge is cosmetic. **Only the y (the price) is load-bearing**; nothing computes off a line's x2.
 
 ### Labels: two render modes, two anchor systems
 

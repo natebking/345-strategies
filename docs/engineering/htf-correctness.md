@@ -2,7 +2,7 @@
 
 How the Suite reads six timeframes from one chart without serving stale, misaligned, or fabricated data — and the traps in `request.security` that make this the hardest part of the codebase.
 
-Written against `pine/TheStratSuite_v3.1.0.pine`. Companion postmortem: `../v2.2.3_holiday_glue_fix.md`. Repaint fundamentals live in `repaint-prevention.md`; this doc assumes them.
+Written against `pine/TheStratSuite_v3.1.1.pine`. Companion postmortem: `../v2.2.3_holiday_glue_fix.md`. Repaint fundamentals live in `repaint-prevention.md`; this doc assumes them.
 
 ---
 
@@ -101,16 +101,18 @@ Three deliberate conservatisms:
 
 ## Rule 6 — Preview mode is the same shift, armed by the market calendar
 
-The market-closed cousin of the straddle: when nothing is trading and a new calendar period has begun, `shouldApplyPreview` applies the identical promotion so traders can plan next period's levels before the open (weekly slots also preview through Fri–Sun even before the calendar week flips).
+The market-closed cousin of the straddle: when nothing is trading and a new calendar period has begun, `shouldApplyPreview` applies the identical promotion so traders can plan next period's levels before the open (every calendar slot, W through 12M, previews once the served period's scheduled close has passed, via `shouldStraddle`; `FIX PREVIEW-WEEKCLOSE-1` replaced the weekly "Fri/Sat/Sun by calendar" test that fired all day Friday, and `FIX PREVIEW-CALCLOSE-1` retired the month/quarter/year calendar comparisons that misread session-stamped futures periods during the CME maintenance hour).
 
 Auto-detection is per asset class (`isEquityLike` / `isFuturesLike` / crypto):
 
 - **Equities/ETFs/options/indices**: before 9:30 ET, after 16:00, weekends.
 - **Futures/forex/commodities**: weekend closure (Fri 17:00 → Sun 18:00 ET) and the daily 17:00–18:00 maintenance window.
 - **Crypto**: 24/7 — only the holiday fallback can trigger it.
-- **Everything**: the holiday fallback — now is `max(3 × chart period, 4h)` past the last bar's scheduled close (`isHolidayClosed`, Rule 4).
+- **Everything**: the holiday fallback — now is more than 4h past the last bar's scheduled close (`isHolidayClosed`, Rule 4; `FIX AUTO-SESSION-1` flattened the old `max(3 × chart period, 4h)`, which was 72h on daily charts and never fired on an exchange holiday or early close).
+- **Veto, all classes**: none of the above arms while the chart's last bar is still ahead of its scheduled close (`lastBarClosed`, `FIX AUTO-SESSION-1`). The ET windows describe US exchanges; a live bar on any exchange, session or extended-hours chart wins over the clock.
+- **Chart types without a scheduled close**: on Renko, Kagi, Line Break, Point & Figure and Range charts the forming bar's `time_close` is `na`, so Auto never arms and `shouldStraddle` never fires there (under `On`, only daily and intraday slots still preview). Those chart types are unsupported: `syminfo.tickerid` hands the chart-type-modified series to the HTF slots. Heikin Ashi is time-based and unaffected.
 
-All of it is wall-clock logic, so all of it is gated `barstate.islast and not isBarReplay` and never touches history. Preview slots suppress their open line (the open is a proxy), and every preview/straddled slot is excluded from alerts (`slotPreview`, `okA1`–`okA6`) — the period reset re-arms alerting cleanly on the first real bar of the new period.
+All of it is wall-clock logic, so all of it is gated `barstate.islast and not isBarReplay` and never touches history. Preview slots suppress their own open line (the open is a proxy; the gate is per slot, `FIX OPENLINE-PREVIEW-1`), and every preview/straddled slot is excluded from alerts (`slotPreview`, `okA1`–`okA6`), from the Domino chain (`FIX DOMINO-PREVIEW-1`, the synthetic CC always classifies inside) and from Lead anchoring (`FIX LEAD-PREVIEW-1`, an estimate-grade slot must not suppress a real one) — the period reset re-arms alerting cleanly on the first real bar of the new period.
 
 ---
 

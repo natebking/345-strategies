@@ -14,7 +14,7 @@ Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 
 ### Quick start
 
-1. Add [the indicator](https://www.tradingview.com/script/dnJOzGmk-TheStrat-Suite-Open-Source-Entries-Targets-and-Stop-Loss/) to your chart on TradingView — or copy `pine/TheStratSuite_v3.1.0.pine` into the Pine editor (it imports TheStratGrammar, published on TradingView).
+1. Add [the indicator](https://www.tradingview.com/script/dnJOzGmk-TheStrat-Suite-Open-Source-Entries-Targets-and-Stop-Loss/) to your chart on TradingView — or copy `pine/TheStratSuite_v3.1.1.pine` into the Pine editor (it imports TheStratGrammar, published on TradingView).
 2. Pick a Timeframe Preset (TheStrat Classic, Scalp, Day Trade, Futures/Crypto, Swing Trade, Investing) — or set Custom and configure the six slots yourself.
 3. Read `docs/concepts/bar-types.md` and `docs/concepts/signals.md` to learn what you're looking at.
 
@@ -22,11 +22,14 @@ Setup guides and background: [thestratsuite.com](https://thestratsuite.com)
 
 ### `pine/` — indicator source (newest first)
 
-- **`TheStratSuite_v3.1.0.pine`** — current build, published 2026-08-25. GRAMMAR-LIB-1
-  (classification delegated to TheStratGrammar), CONT22-PRIOR-1 (2-2 continuations no longer
-  blocked by a prior outside bar), DEBUG-TERMS-1 (debug panel shows every in-force term),
-  PERF-FTFC-1 and PERF-ALLOC-3 (two per-bar costs the library migration introduced, removed),
-  LABELTEXT-1 (a label whose text color had no contrast against its own background).
+- **`TheStratSuite_v3.1.1.pine`** — current build. Preview-path bundle: PREVIEW-WEEKCLOSE-1 and
+  PREVIEW-CALCLOSE-1 (calendar slots preview by scheduled close, so Friday pre-market keeps the
+  forming week), AUTO-SESSION-1 (Auto never arms while the chart's bar is open; holidays and
+  early closes arm it), LEAD-PREVIEW-1, DOMINO-PREVIEW-1, OPENLINE-PREVIEW-1 (preview slots
+  cannot lead, domino, or hide an unshifted slot's open line), LINEEND-CLOSE-1 (lines reach the
+  end of holiday-glued bars).
+- `TheStratSuite_v3.1.0.pine` — published 2026-08-25. GRAMMAR-LIB-1 (classification delegated
+  to TheStratGrammar), CONT22-PRIOR-1, DEBUG-TERMS-1, PERF-FTFC-1, PERF-ALLOC-3, LABELTEXT-1.
 - `TheStratSuite_v3.0.1.pine` — TABLE-COMPACT-COLOR-1 (Compact table cells colored by signal
   state or per-timeframe continuity), LEAD-TABLE-1, abbreviated Universal labels.
 - `TheStratSuite_v3.0.0.pine` — the first open-source publication on TradingView. BARCOLOR-1
@@ -53,7 +56,7 @@ the definition; `thestrat_grammar/` is a dependency-free Python reference implem
 compares the two across 40,000 random bars in both detection methods, so the spec can't
 drift from the indicator.
 `TheStratGrammar.pine` is the same grammar as a TradingView library; the Suite imports it as of
-v3.1.0 (`import SpinTrades/TheStratGrammar/1`). Published versions: `PUBLISHED.md`.
+v3.1.1 (`import SpinTrades/TheStratGrammar/1`). Published versions: `PUBLISHED.md`.
 
 ### `pine-draw/` — drawing components (Pine v6)
 
