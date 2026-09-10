@@ -1,6 +1,7 @@
 # Display studies: decisions and test record
 
-Updated 2026-09-02. This log covers `price_display.pine`, `instrument_display.pine`,
+Updated 2026-09-10. This log covers the consolidated `display_studio.pine` candidate and
+the four earlier sources: `price_display.pine`, `instrument_display.pine`,
 `composition_overlays.pine`, and `console_strip.pine`. They are standalone siblings,
 not part of TheStrat Suite.
 
@@ -13,6 +14,7 @@ not a published Rivian UI kit. This is an independent visual study.
 
 | Item | State |
 | --- | --- |
+| Display Studio | Implemented as one 4-readout × 4-layout overlay with four themes and optional canvas/candles; static and source-contract review completed 2026-09-10; TradingView compile/render/reload verification still required |
 | Price Display source | Compiled, saved, displayed, and checked after reload on SPX 1D |
 | Four native chart palettes | Applied and compared on the same SPX daily candle composition; saved and reloaded |
 | Large default-font headline and monospace labels | Verified in the price display at 56pt and 11pt |
@@ -24,6 +26,64 @@ not a published Rivian UI kit. This is an independent visual study.
 The source, this log, and the chart-only [composition gallery](README.md#composition-gallery)
 are the portable record. No account-specific layout links, account data, or screenshots
 containing browser/interface chrome are included.
+
+## Consolidation pass: from studies to one indicator
+
+The 2026-09-10 pass responds to the request for one publishable indicator with options,
+while continuing the composition exploration rather than only swapping the large number.
+The result is `display_studio.pine`, titled **Automotive Display Studio** in Pine. Its public
+name and source commentary are intentionally generic; the external design references remain
+in this research log.
+
+The central decision was to separate two independent questions:
+
+- **Readout:** Price, Range Position, Relative Range, or Instrument.
+- **Layout:** Classic Card, Horizon Header, Inset Panel, or Bottom Rail.
+
+That produces sixteen available combinations from one table renderer. Price + Classic Card
+is the default because the user selected the earlier Classic result as the preferred direction.
+Bottom Rail is new: it translates the horizontal Console composition into
+the main-chart overlay so one script can offer the visual, while keeping the existing
+`console_strip.pine` for users who need guaranteed pane separation.
+
+### What was tried, retained, or rejected
+
+| Trial | Result | Decision and reason |
+| --- | --- | --- |
+| One dropdown containing the six earlier modes | Technically simple, but it keeps content and composition entangled | Replaced with independent Readout and Layout inputs. This forms one display system and allows the non-price metrics to use every composition. |
+| One dynamically sized `var table` | The earlier compiled two-layout source establishes the input-reload pattern, but not the exact new four-way expression | Retained as a technically sound candidate. Classic uses 1 × 6, Horizon 5 × 4, Inset 5 × 6, and Bottom Rail 5 × 2. The exact source still requires its TradingView compile pass. |
+| Cell merging to preserve the old four-chip palette key | Merges complicate mode-specific geometry and Pine has no corresponding unmerge operation | Removed from Display Studio. The earlier Price Display keeps the study. Studio applies themes directly to its table, canvas, and candle layer, so the key is no longer the feature. |
+| Keep all color work as manual native chart setup | Reliable, but it makes the green exploration easy to miss and weakens the value of one consolidated indicator | Extended. Display Studio can draw a coordinated candle layer and canvas. Both are explicit inputs, and native styling remains available by turning them off. |
+| Ink hollow-bodied treatment | The favorite screenshot used canvas-colored up bodies with dark outlines and solid dark down bodies | Retained as the default Ink theme. It uses ordinary OHLC semantics rather than TradingView's separate Hollow Candles chart type. |
+| Muted field green and bright charging green as one color | They serve different roles and have different contrast needs | Rejected. Field keeps `#5F6559`; Charge keeps `#72DC57` with `#5F6559` edges. They remain separate themes. |
+| Theme-controlled accents only | Coherent defaults, but sometimes blue, gold, or green is needed to mark a deliberate focal point | Extended with a small Accent override. The override changes rules and panel edges, not the meaning of data. |
+| Import the reference typefaces | Pine exposes only its native default and monospace families for table text; the proprietary reference font files are not distributed here | Rejected. The established pairing remains bold native default for the headline and native monospace for context. |
+| Put the real separate-pane Console in the same selector | Pine's `overlay` setting is script-wide. A pane script can promote an individual table to the main chart with `table.new(..., force_overlay=true)`, but a main-chart overlay cannot create a separate pane on demand. Declaring the combined script with `overlay=false` would make it own a pane even while a main-chart layout is selected. | Rejected as a poor default rather than technically impossible. Display Studio stays a clean main-chart overlay and offers Bottom Rail; Console Strip remains a companion when a true pane is required. |
+| Automatic responsive layout and collision avoidance | Pine tables expose pane-relative cell dimensions but not viewport width, text measurement, candle collision, or CSS-style breakpoints | Not possible in the current table model. Headline size and chart margins remain explicit user controls. |
+| Web-style easing, masked text reels, and crossfades | Pine tables update from script execution and do not provide a browser animation timeline | Not implemented. Motion remains a possible web prototype, not a TradingView publication claim. |
+
+### New opportunities created by the consolidation
+
+- A future fifth readout can be added once with explicit units and then inherits all four
+  layouts, instead of requiring a new source for every visual treatment.
+- A compact preset could coordinate 36pt type and tighter supporting labels, but Pine cannot
+  infer when the viewport needs it; it must remain an explicit setting or layout variant.
+- Bottom Rail can become a matching second publication only if the separate-pane behavior is
+  important enough to justify a distinct script. TradingView discourages near-duplicate public
+  publications, so the default recommendation is one public Studio and an unpublished companion.
+- Optional confirmed-bar display could reduce forming-value movement, but it would change the
+  meaning of “latest” and needs a clear new input and description rather than a silent latch.
+- A small range-position gauge could complement the numeral, provided it preserves text and
+  does not make color the only encoding.
+
+### Consolidated candidate status
+
+The source has been reviewed for the important structural contracts: one persistent table,
+history-dependent `ta.sma()` execution outside the last-bar renderer, explicit divide-by-zero
+handling, no external data requests, no alerts/orders, and generic ASCII publication naming.
+The exact source has **not** been compiled or visually inspected in TradingView in the
+2026-09-10 pass. The pairwise runtime matrix and ready-to-paste public description are in
+[`PUBLISHING.md`](PUBLISHING.md). Until that gate passes, the word “candidate” is intentional.
 
 ## Reference research and its boundaries
 
@@ -76,9 +136,10 @@ indicator attempts to copy the page's motion or includes Rivian source, fonts, o
 
 ## Four native chart palettes
 
-These settings are manual TradingView chart settings. The scripts' Palette inputs only
-style their tables. Changing an input does not change the chart canvas, candles, scale
-labels, or surrounding TradingView interface.
+These settings began as manual TradingView chart settings. The four earlier scripts' Palette
+inputs style only their tables. Display Studio reuses the same values under the generic Ink,
+Field, Charge, and Night names and can optionally draw its own canvas and candle layer. It
+still cannot change native scale labels, chart margins, grids, or surrounding TradingView UI.
 
 | Setting | Cloud & Field | Ink & Paper | Charging Green | Night Expedition |
 | --- | --- | --- | --- | --- |
@@ -359,6 +420,7 @@ rendering, or reload behavior.
 | 2026-09-02 | Console Strip, SPX 1D | Current source compiled and added as the only Console instance; explicit layout save and reload at 1464 × 681 retained its 48pt headline, 12pt captions, 14pt values, hidden native title, approximately 141px lower pane, and native 10% / 10% margins with 10 bars right; complete readout and no candle overlap |
 | 2026-09-02 | Compact 722 × 677 frame | Initial fixed-column Inset and 48pt Console clipped. Inset automatic width (`DISPLAY-WIDTH-1`) showed the full 56pt price but could overlap candles; manual 36pt / 0% inset removed overlap in the inspected frame. Console 36pt resolved price clipping on an earlier instance before the final 12pt / 14pt supporting text was attached. That was price-size-only coverage, not a final-version compact pass, mobile pass, or general responsive-layout pass |
 | 2026-09-02 | Wide chart-only images | All three captures are 1359 × 600 crops from the same 1464 × 681 browser viewport, with matching visible candles and values; inspected for complete text, candle overlap, and publication privacy. Console's candle placement differs vertically because of its separate pane. |
+| 2026-09-10 | Display Studio source contract | Consolidated source added with independent 4 × 4 Readout/Layout inputs, generic public name, direct theme canvas/candles, one mode-sized `var table`, and global relative-range SMA. Static review passed; no TradingView compile, render, save, reload, screenshot, narrow-view, or forming-bar claim is made for this source yet. |
 
 At capture time, Range Position showed `69%`, Relative Range showed `0.60×`, and Instrument
 showed the ticker with price, current-bar percentage, and a short description. Those are
@@ -380,8 +442,10 @@ or runtime edge cases on other symbols and markets.
 
 - No `request.security` or lower-timeframe request. No HTF slots, preview path, calendar
   parsing, session inference, staleness calculation, or `timenow`.
-- No alerts, trading state, or historical candle paint. The only `var` object is each
-  display's table; its cells are recreated from current series data on the last bar.
+- No alerts, orders, or trading state. The only `var` object is each display's table; its
+  cells are overwritten from current series data on the last bar. Display Studio optionally
+  plots a purely presentational OHLC candle layer across chart history; it does not classify,
+  signal, or latch those candles.
 - Console Strip's pane background is a constant color, not historical price-state paint.
   It uses no `force_overlay=true` output and does not recolor the main-chart candles.
 - The relative-range SMA has one unconditional global call site, not a per-slot, loop,
@@ -396,7 +460,7 @@ or runtime edge cases on other symbols and markets.
 
 | Idea | Why test it | Required guardrail |
 | --- | --- | --- |
-| User-selected metric input | Make the headline useful beyond these three fixed studies | Define units, missing values, formatting, and whether the selected source is forming or confirmed; do not imply support before testing |
+| Custom source readout | Extend Studio beyond its four defined readouts | Define units, missing values, formatting, and whether the selected source is forming or confirmed; a generic numeric source cannot supply its own trustworthy label or units automatically |
 | TheStrat structure and context | Show one useful state such as an inside or directional bar | Reuse the repository's grammar. Structure and close-versus-open sign are different channels; do not turn a red `2u` into `2d` |
 | A short status word | Read faster than a row of numbers | Use an explicit, documented rule and distinguish forming from confirmed state; do not invent confidence or prediction labels |
 | Alignment matrix | Compare top-left, top-right, lower corners, and supporting-label alignment | Test table collisions, long values, and native scales; fixed anchors are not a free-position panel system |

@@ -76,15 +76,16 @@ it to the other side; a session reset re-seeds it at the open, at the gap-fill l
 gap. Forked from the Classic path of my invalidation stop work. Not published on
 TradingView. See `invalidation-stop/README.md`.
 
-### `price-display/` — price readout and display studies (Pine v6)
+### `price-display/` — Automotive Display Studio and design studies (Pine v6)
 
-Standalone displays built around a large readout and monospaced labels. Price Display is
-the original price baseline. Instrument Display explores different content. Composition
-Overlays and Console Strip instead keep price content constant and change its arrangement:
-a distributed header, an inset dark card, or a separate lower pane. None adds signals,
-changes candle colors, or imports the Suite. Console Strip colors only its own pane in
-its default lower-pane placement. See the [gallery and setup](price-display/README.md)
-and [design log](price-display/DESIGN_NOTES.md) for recipes, trials, limits, and test status.
+`display_studio.pine` consolidates the work into one main-chart indicator: four readouts
+(price, range position, relative range, and instrument) combine independently with four
+layouts (classic card, distributed header, inset panel, and bottom rail). Four coordinated
+themes can also draw the chart canvas and an OHLC candle layer. The earlier single-purpose
+sources remain as the research record, including Console Strip when the footer must occupy a
+true separate pane. None adds signals, alerts, orders, external data requests, or Suite
+dependencies. See the [setup and gallery](price-display/README.md), [design log](price-display/DESIGN_NOTES.md),
+and [publication packet](price-display/PUBLISHING.md) for the verification gate and ready description.
 
 ### `docs/`
 

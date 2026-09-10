@@ -1,24 +1,38 @@
-# Price Display and composition studies
+# Automotive Display Studio and composition studies
 
 A set of standalone Pine Script v6 displays using a large readout, monospaced labels, and a restrained color palette. These are independent of TheStrat Suite and require no other scripts. This is an original visual homage, not an official Rivian product.
 
+Start with `display_studio.pine`. It turns the earlier experiments into one configurable
+main-chart indicator: choose the information independently from its composition, then choose
+the theme, accent, canvas treatment, and candles. The older sources remain as the research
+record and as smaller examples.
+
 | Source | Purpose | Placement |
 | --- | --- | --- |
+| `display_studio.pine` | Consolidated publication candidate: 4 readouts × 4 layouts, 4 themes, optional themed canvas and candles | Main-chart overlay |
 | `price_display.pine` | Original latest-price baseline | Top-left overlay |
 | `instrument_display.pine` | Content experiments: Range Position, Relative Range, Instrument | Top-left overlay |
 | `composition_overlays.pine` | Same price payload in Horizon Header or Inset Panel | Main-chart overlay |
 | `console_strip.pine` | Same price payload in a horizontal footer | Separate lower pane |
 
-None has signals, alerts, orders, external data requests, or candle-recoloring calls. Console Strip uses `bgcolor` only for its own pane in the default placement. No script is a TheStrat Suite feature.
+None has signals, alerts, orders, or external data requests. Display Studio can draw a themed
+candle layer and canvas on the main chart; both controls are visible inputs and can be turned
+off. The four earlier sources do not recolor the main chart. Console Strip uses `bgcolor` only
+for its own pane in the default placement. No script is a TheStrat Suite feature.
 
-These are research prototypes with scoped desktop verification. Compact settings are manual adjustments, not automatic responsive behavior. Other markets, new-bar boundaries, and mobile layouts remain unverified.
+The four earlier studies have the scoped desktop verification recorded below. Display Studio
+was assembled and statically reviewed on 2026-09-10, but has not yet had its required
+TradingView compile/save/reload and visual matrix pass. It is a publication candidate, not a
+verified public release. Compact settings are manual adjustments, not automatic responsive
+behavior. Other markets, new-bar boundaries, and mobile layouts remain unverified.
 
 The [design notes](DESIGN_NOTES.md) distinguish content choices from composition, and record the trials, retained and rejected ideas, limits, and test status. Ink & Paper was the preferred chart direction. The price baseline still defaults to Cloud & Field; the content study defaults to Ink & Paper. The new compositions use the Ink & Paper chart recipe.
 
 ## Install
 
 1. Open a chart in TradingView and create a new indicator in Pine Editor.
-2. Replace the editor contents with one source file from the table above.
+2. For the consolidated version, replace the editor contents with `display_studio.pine`.
+   Use another source from the table only when reproducing an individual research study.
 3. Save the script, then select **Add to chart**.
 4. Open the indicator's settings to choose its appearance. Apply the native chart settings below separately; the scripts do not install a chart template.
 5. Save the chart layout, reload it, and verify the displayed version and settings.
@@ -26,6 +40,66 @@ The [design notes](DESIGN_NOTES.md) distinguish content choices from composition
 Compare one display at a time. Several overlays share chart space and can cover one another. Add Console Strip as a new script instance and keep it in its separate lower pane. Native pane placement does not change merely because an existing script's `overlay` declaration is edited.
 
 Saving source and saving a chart layout are separate actions. When updating, open the current saved source from the script library, update or add the correct chart instance, save both source and layout, then reload and verify. An instance can retain an older saved version; its historical read-only editor view is not itself a defect.
+
+## Display Studio
+
+Display Studio is a composition system rather than a list of six mutually exclusive demos.
+The **Readout** and **Layout** inputs are independent, so every readout works in every layout:
+
+| Readout | Headline | Supporting context |
+| --- | --- | --- |
+| Price | Latest chart close | This bar's open-to-close absolute and percentage change |
+| Range Position | Close's 0–100% position inside this bar | Current bar definition and edge-case tooltip |
+| Relative Range | Current high-low range divided by the prior completed-bar average | Configurable 2–500 bar lookback, 20 by default |
+| Instrument | Ticker | Latest price, currency when available, and this-bar percentage |
+
+| Layout | Composition | Placement |
+| --- | --- | --- |
+| Classic Card | The preferred large-number baseline with a compact label stack and short accent rule | Top left |
+| Horizon Header | Instrument left, headline centered, context right, and a thin full-width rule | Top center |
+| Inset Panel | Reversed compact panel with a narrow accent edge | Top left |
+| Bottom Rail | Wide three-part readout across the bottom of the main chart | Bottom center overlay |
+
+This produces sixteen available readout/layout combinations in one indicator. Price + Classic
+Card is the default because it preserves the user's preferred earlier direction. Bottom Rail is the single-script version
+of the footer idea; it can cover candles unless enough native bottom margin is reserved. Use
+`console_strip.pine` when the footer must occupy a genuinely separate pane.
+
+### Display Studio inputs
+
+| Input | Default | Options / behavior |
+| --- | --- | --- |
+| Readout | Price | Price, Range Position, Relative Range, Instrument |
+| Relative range lookback | 20 | 2–500 prior completed chart bars; used only by Relative Range |
+| Short instrument description | On | Instrument only; omitted above 28 characters |
+| Layout | Classic Card | Classic Card, Horizon Header, Inset Panel, Bottom Rail |
+| Headline size | 56pt | 36, 48, 56, or 64pt |
+| Top inset | 3% | 0–15%; ignored by Bottom Rail |
+| Theme | Ink | Ink, Field, Charge, Night |
+| Accent | Theme | Theme default, blue, gold, or bright green |
+| Transparent classic card | Off | Classic Card only |
+| Apply theme canvas | On | Independent of themed candles; native canvas still controls unloaded margins and surrounding UI |
+| Draw themed candles | On | Draws an OHLC candle layer above the native series; turn off to retain native chart styling |
+
+The default **Ink** treatment recreates the preferred ordinary-candle look: canvas-colored up
+bodies with charcoal borders and wicks, and solid charcoal down bodies. The other three themes
+make the green and accent explorations operational rather than merely showing color chips:
+
+| Theme | Canvas | Up body | Up edge | Down | Theme accent |
+| --- | --- | --- | --- | --- | --- |
+| Ink | `#F6F6F6` | `#F6F6F6` | `#101512` | `#101512` | `#FFAC03` |
+| Field | `#F6F6F6` | `#5F6559` | `#5F6559` | `#DE311E` | `#5F6559` |
+| Charge | `#F2F2F2` | `#72DC57` | `#5F6559` | `#293846` | `#72DC57` |
+| Night | `#02171C` | `#84ACB3` | `#84ACB3` | `#FFAC03` | `#FFAC03` |
+
+The candle layer uses the chart's own OHLC and classifies `close >= open` as up. It sits in
+front of the native candle series. Turn it off when another chart type or another indicator
+should own the candle rendering. The canvas control is independent and can remain on behind
+native candles; turn it off when native chart settings should own the background as well.
+
+For a public release, use the ready-to-paste description and release gate in
+[`PUBLISHING.md`](PUBLISHING.md). Do not publish until the current consolidated source has
+compiled, been added as a fresh chart instance, and passed the recorded matrix.
 
 ## Composition gallery
 
