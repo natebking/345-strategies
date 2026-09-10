@@ -8,7 +8,7 @@ How to read this file:
 - **Every fix cites its `FIX` tag.** Grep the current source for the tag to find the exact code and the full inline rationale. Code references are function names and tags, never line numbers.
 - **Dates** come from dated `FIX` comments and file names. Where a snapshot carries no date of its own (2.2.2), the newest dated comment introduced in it is used.
 
-## [3.1.1] — 2026-09-08
+## [3.1.1] — 2026-09-10
 
 Requires TheStratGrammar (TV version 1). Source: `pine/TheStratSuite_v3.1.1.pine`. Seven fixes to the preview path, found after a Friday pre-market report on SPY and a follow-up scan; details in each entry.
 
