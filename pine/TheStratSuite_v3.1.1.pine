@@ -723,6 +723,10 @@ findExhaustionLevels() =>
     int exhHighTime = na
     float exhLowPrice = na
     int exhLowTime = na
+    float nxtHighPrice = na
+    int nxtHighTime = na
+    float nxtLowPrice = na
+    int nxtLowTime = na
     // Only calculate on recent bars - historical exhaustion is never displayed
     // Loop goes to 48, but accesses i+1, so max offset is 49
     // Require bar_index > 50 to ensure enough historical data
@@ -736,24 +740,48 @@ findExhaustionLevels() =>
         // back into the intact-pivot gate would re-introduce the live-vs-reload repaint this
         // fix removes. A period-open exhaustion snapshot that sits slightly behind live price
         // on a rare mid-period preview re-latch is acceptable and, crucially, reload-stable.
-        float maxHighSoFar = high[1]
-        float minLowSoFar = low[1]
-        for i = 2 to 48
-            if na(exhHighPrice)
-                isPivotHigh = high[i] > high[i-1] and high[i] > high[i+1]
-                if isPivotHigh and maxHighSoFar < high[i]
+        // FIX EXH-PREVIEW-CHANNEL-1 (2026-09-13): one pass, two channels, neither of which consults
+        // the wall clock - which channel gets USED is decided on the last-bar control path, in
+        // applyPreviewShift. The CURRENT channel is P0-2 unchanged: seed [1], candidates from i=2,
+        // the forming bar never touches the intact-pivot gate. The NEXT channel answers the question
+        // a preview projection actually asks - what is the target for the period that has not opened
+        // yet - by seeding [0] and allowing a candidate at i=1. Consuming it is safe ONLY where [0]
+        // has already closed, which is exactly the gate applyPreviewShift applies.
+        //
+        // Why not simply re-index the single channel by time_close: that was tried and rejected
+        // (Codex review, 2026-09-13). With Preview Mode Off on a closed market the slot stays on the
+        // finished period, nothing re-latches, and the stored snapshot keeps the value latched at
+        // that period's OPEN; a reload would re-run newPeriod with the clock now past the close and
+        // latch the next period's answer instead. Live and reload would disagree on the exhaustion
+        // price, its crossed state, its TAW and its break-even - the precise repaint P0-2 exists to
+        // prevent. Deterministic channels plus a last-bar selector keep Rule 7 intact.
+        float maxCur = high[1]
+        float minCur = low[1]
+        float maxNxt = high[0]
+        float minNxt = low[0]
+        for i = 1 to 48
+            isPivotHigh = high[i] > high[i-1] and high[i] > high[i+1]
+            isPivotLow = low[i] < low[i-1] and low[i] < low[i+1]
+            if na(nxtHighPrice) and isPivotHigh and maxNxt < high[i]
+                nxtHighPrice := high[i]
+                nxtHighTime := time[i]
+            if na(nxtLowPrice) and isPivotLow and minNxt > low[i]
+                nxtLowPrice := low[i]
+                nxtLowTime := time[i]
+            if i >= 2
+                if na(exhHighPrice) and isPivotHigh and maxCur < high[i]
                     exhHighPrice := high[i]
                     exhHighTime := time[i]
-            if na(exhLowPrice)
-                isPivotLow = low[i] < low[i-1] and low[i] < low[i+1]
-                if isPivotLow and minLowSoFar > low[i]
+                if na(exhLowPrice) and isPivotLow and minCur > low[i]
                     exhLowPrice := low[i]
                     exhLowTime := time[i]
-            maxHighSoFar := math.max(maxHighSoFar, high[i])
-            minLowSoFar := math.min(minLowSoFar, low[i])
-            if not na(exhHighPrice) and not na(exhLowPrice)
+                maxCur := math.max(maxCur, high[i])
+                minCur := math.min(minCur, low[i])
+            maxNxt := math.max(maxNxt, high[i])
+            minNxt := math.min(minNxt, low[i])
+            if not na(exhHighPrice) and not na(exhLowPrice) and not na(nxtHighPrice) and not na(nxtLowPrice)
                 break
-    [exhHighPrice, exhHighTime, exhLowPrice, exhLowTime]
+    [exhHighPrice, exhHighTime, exhLowPrice, exhLowTime, nxtHighPrice, nxtHighTime, nxtLowPrice, nxtLowTime]
 
 // GRAMMAR-LIB-1: stays local. It sat inside the CandleMetrics block that moved into the
 // library, but the library exports no inside-bar helper - sg.structureOf() == "1" is the
@@ -775,8 +803,9 @@ calcBarNum(prevH, prevL, currH, currL) =>
     st == "" ? "" : str.substring(st, 0, 1)
 
 getDataWithExhaustion() =>
-    [exhHP, exhHT, exhLP, exhLT] = findExhaustionLevels()
-    [time, open, high, low, close, time[1], high[1], low[1], open[1], close[1], time[2], high[2], low[2], open[2], close[2], high[3], low[3], high[4], low[4], exhHP, exhHT, exhLP, exhLT]
+    // FIX EXH-PREVIEW-CHANNEL-1: both channels ride the same request.security tuple.
+    [exhHP, exhHT, exhLP, exhLT, nxHP, nxHT, nxLP, nxLT] = findExhaustionLevels()
+    [time, open, high, low, close, time[1], high[1], low[1], open[1], close[1], time[2], high[2], low[2], open[2], close[2], high[3], low[3], high[4], low[4], exhHP, exhHT, exhLP, exhLT, nxHP, nxHT, nxLP, nxLT]
 
 calculateFTFC(tf1_en, tf1_o, tf1_c, tf2_en, tf2_o, tf2_c, tf3_en, tf3_o, tf3_c, tf4_en, tf4_o, tf4_c, tf5_en, tf5_o, tf5_c, tf6_en, tf6_o, tf6_c) =>
     // PERF-FTFC-1: deliberately NOT routed through sg.continuity. This function is called
@@ -1009,12 +1038,12 @@ simple int cb4 = rTF4 == "M" or rTF4 == "1M" or rTF4 == "3M" or rTF4 == "6M" or 
 simple int cb5 = rTF5 == "M" or rTF5 == "1M" or rTF5 == "3M" or rTF5 == "6M" or rTF5 == "12M" ? 100 : rTF5 == "W" or rTF5 == "1W" ? 100 : rTF5 == "D" or rTF5 == "1D" ? 150 : rTF5 == "240" or rTF5 == "480" or rTF5 == "720" ? 200 : 250
 simple int cb6 = rTF6 == "M" or rTF6 == "1M" or rTF6 == "3M" or rTF6 == "6M" or rTF6 == "12M" ? 100 : rTF6 == "W" or rTF6 == "1W" ? 100 : rTF6 == "D" or rTF6 == "1D" ? 150 : rTF6 == "240" or rTF6 == "480" or rTF6 == "720" ? 200 : 250
 
-[tf1CurrTime, tf1O, tf1H_curr, tf1L_curr, tf1C, tf1Time, tf1H, tf1L, tf1O_C1, tf1C_C1, tf1MagTime, tf1MagH, tf1MagL, tf1O_C2, tf1C_C2, tf1H_C3, tf1L_C3, tf1H_C4, tf1L_C4, tf1ExhHP, tf1ExhHT, tf1ExhLP, tf1ExhLT] = request.security(syminfo.tickerid, rTF1, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb1)
-[tf2CurrTime, tf2O, tf2H_curr, tf2L_curr, tf2C, tf2Time, tf2H, tf2L, tf2O_C1, tf2C_C1, tf2MagTime, tf2MagH, tf2MagL, tf2O_C2, tf2C_C2, tf2H_C3, tf2L_C3, tf2H_C4, tf2L_C4, tf2ExhHP, tf2ExhHT, tf2ExhLP, tf2ExhLT] = request.security(syminfo.tickerid, rTF2, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb2)
-[tf3CurrTime, tf3O, tf3H_curr, tf3L_curr, tf3C, tf3Time, tf3H, tf3L, tf3O_C1, tf3C_C1, tf3MagTime, tf3MagH, tf3MagL, tf3O_C2, tf3C_C2, tf3H_C3, tf3L_C3, tf3H_C4, tf3L_C4, tf3ExhHP, tf3ExhHT, tf3ExhLP, tf3ExhLT] = request.security(syminfo.tickerid, rTF3, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb3)
-[tf4CurrTime, tf4O, tf4H_curr, tf4L_curr, tf4C, tf4Time, tf4H, tf4L, tf4O_C1, tf4C_C1, tf4MagTime, tf4MagH, tf4MagL, tf4O_C2, tf4C_C2, tf4H_C3, tf4L_C3, tf4H_C4, tf4L_C4, tf4ExhHP, tf4ExhHT, tf4ExhLP, tf4ExhLT] = request.security(syminfo.tickerid, rTF4, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb4)
-[tf5CurrTime, tf5O, tf5H_curr, tf5L_curr, tf5C, tf5Time, tf5H, tf5L, tf5O_C1, tf5C_C1, tf5MagTime, tf5MagH, tf5MagL, tf5O_C2, tf5C_C2, tf5H_C3, tf5L_C3, tf5H_C4, tf5L_C4, tf5ExhHP, tf5ExhHT, tf5ExhLP, tf5ExhLT] = request.security(syminfo.tickerid, rTF5, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb5)
-[tf6CurrTime, tf6O, tf6H_curr, tf6L_curr, tf6C, tf6Time, tf6H, tf6L, tf6O_C1, tf6C_C1, tf6MagTime, tf6MagH, tf6MagL, tf6O_C2, tf6C_C2, tf6H_C3, tf6L_C3, tf6H_C4, tf6L_C4, tf6ExhHP, tf6ExhHT, tf6ExhLP, tf6ExhLT] = request.security(syminfo.tickerid, rTF6, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb6)
+[tf1CurrTime, tf1O, tf1H_curr, tf1L_curr, tf1C, tf1Time, tf1H, tf1L, tf1O_C1, tf1C_C1, tf1MagTime, tf1MagH, tf1MagL, tf1O_C2, tf1C_C2, tf1H_C3, tf1L_C3, tf1H_C4, tf1L_C4, tf1ExhHP, tf1ExhHT, tf1ExhLP, tf1ExhLT, tf1NxHP, tf1NxHT, tf1NxLP, tf1NxLT] = request.security(syminfo.tickerid, rTF1, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb1)
+[tf2CurrTime, tf2O, tf2H_curr, tf2L_curr, tf2C, tf2Time, tf2H, tf2L, tf2O_C1, tf2C_C1, tf2MagTime, tf2MagH, tf2MagL, tf2O_C2, tf2C_C2, tf2H_C3, tf2L_C3, tf2H_C4, tf2L_C4, tf2ExhHP, tf2ExhHT, tf2ExhLP, tf2ExhLT, tf2NxHP, tf2NxHT, tf2NxLP, tf2NxLT] = request.security(syminfo.tickerid, rTF2, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb2)
+[tf3CurrTime, tf3O, tf3H_curr, tf3L_curr, tf3C, tf3Time, tf3H, tf3L, tf3O_C1, tf3C_C1, tf3MagTime, tf3MagH, tf3MagL, tf3O_C2, tf3C_C2, tf3H_C3, tf3L_C3, tf3H_C4, tf3L_C4, tf3ExhHP, tf3ExhHT, tf3ExhLP, tf3ExhLT, tf3NxHP, tf3NxHT, tf3NxLP, tf3NxLT] = request.security(syminfo.tickerid, rTF3, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb3)
+[tf4CurrTime, tf4O, tf4H_curr, tf4L_curr, tf4C, tf4Time, tf4H, tf4L, tf4O_C1, tf4C_C1, tf4MagTime, tf4MagH, tf4MagL, tf4O_C2, tf4C_C2, tf4H_C3, tf4L_C3, tf4H_C4, tf4L_C4, tf4ExhHP, tf4ExhHT, tf4ExhLP, tf4ExhLT, tf4NxHP, tf4NxHT, tf4NxLP, tf4NxLT] = request.security(syminfo.tickerid, rTF4, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb4)
+[tf5CurrTime, tf5O, tf5H_curr, tf5L_curr, tf5C, tf5Time, tf5H, tf5L, tf5O_C1, tf5C_C1, tf5MagTime, tf5MagH, tf5MagL, tf5O_C2, tf5C_C2, tf5H_C3, tf5L_C3, tf5H_C4, tf5L_C4, tf5ExhHP, tf5ExhHT, tf5ExhLP, tf5ExhLT, tf5NxHP, tf5NxHT, tf5NxLP, tf5NxLT] = request.security(syminfo.tickerid, rTF5, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb5)
+[tf6CurrTime, tf6O, tf6H_curr, tf6L_curr, tf6C, tf6Time, tf6H, tf6L, tf6O_C1, tf6C_C1, tf6MagTime, tf6MagH, tf6MagL, tf6O_C2, tf6C_C2, tf6H_C3, tf6L_C3, tf6H_C4, tf6L_C4, tf6ExhHP, tf6ExhHT, tf6ExhLP, tf6ExhLT, tf6NxHP, tf6NxHT, tf6NxLP, tf6NxLT] = request.security(syminfo.tickerid, rTF6, getDataWithExhaustion(), lookahead = barmerge.lookahead_on, calc_bars_count = cb6)
 
 // FIX HTF-STRADDLE-1 (T3, probe-validated): completed DAILY sub-bars of the current chart bar, used
 // to rebuild the true forming HTF candle for straddled slots. Constant gate: the request either always
@@ -1104,7 +1133,7 @@ shouldApplyPreview(string tf, bool previewEnabled) =>
     else
         true
 
-applyPreviewShift(int c1Time, float c1H, float c1L, float c1O, float c1C, int ccTime, float ccO, float ccH, float ccL, float ccC, int c2Time, float c2H, float c2L, float c2O, float c2C, float c3H, float c3L, float c4H, float c4L, float exhHP, int exhHT, float exhLP, int exhLT, string tf, bool previewEnabled, bool straddleEnabled) =>
+applyPreviewShift(int c1Time, float c1H, float c1L, float c1O, float c1C, int ccTime, float ccO, float ccH, float ccL, float ccC, int c2Time, float c2H, float c2L, float c2O, float c2C, float c3H, float c3L, float c4H, float c4L, float exhHP, int exhHT, float exhLP, int exhLT, float nxHP, int nxHT, float nxLP, int nxLT, string tf, bool previewEnabled, bool straddleEnabled) =>
     // FIX HTF-STRADDLE-1: classic preview OR a session-aware live straddle (calendar slot coarser than chart).
     // FIX GLUE-2b (2026-07-06): straddle = now is past the served HTF bar's scheduled close.
     doPreview = shouldApplyPreview(tf, previewEnabled) or (straddleEnabled and isStraddleTF(tf) and shouldStraddle(tf))
@@ -1130,17 +1159,32 @@ applyPreviewShift(int c1Time, float c1H, float c1L, float c1O, float c1C, int cc
         newC4L = c3L
         // FIX P0-1: realPeriodTime = the unshifted real current period-open (the `ccTime` param),
         // even in preview where ccTime is reused as the synthetic C1. New-period detection uses this.
-        TFRawData.new(newC1Time, newC1H, newC1L, newC1O, newC1C, newCCTime, newCCO, newCCH, newCCL, newCCC, newC2Time, newC2H, newC2L, newC2O, newC2C, newC3H, newC3L, newC4H, newC4L, exhHP, exhHT, exhLP, exhLT, true, ccTime)
+        // FIX EXH-PREVIEW-CHANNEL-1: the exhaustion snapshot has to be rebased along with C1/C2, or
+        // the projection inherits a target computed BEFORE the period it just promoted. Observed on
+        // AMD 1W (Sunday): the completed week of Sep 7-11 traded through the Aug 17 pivot, but the
+        // served snapshot had excluded that week, so the broken pivot was still reported intact and
+        // drew a weekly exhaustion BELOW the weekly trigger high, in the crossed colour.
+        // Gate: shouldStraddle(tf) means the served CC has passed its scheduled close, so the NEXT
+        // channel's [0] seed is a finished bar and is reload-stable. previewMode = "On" can force a
+        // preview while the served CC is still forming (daily and intraday slots take the
+        // unconditional branch of shouldApplyPreview); there the current channel stays, which is the
+        // "snapshot slightly behind live price, but reload-stable" tradeoff P0-2 took deliberately.
+        bool ccClosed = shouldStraddle(tf)
+        float pExhHP = ccClosed ? nxHP : exhHP
+        int pExhHT = ccClosed ? nxHT : exhHT
+        float pExhLP = ccClosed ? nxLP : exhLP
+        int pExhLT = ccClosed ? nxLT : exhLT
+        TFRawData.new(newC1Time, newC1H, newC1L, newC1O, newC1C, newCCTime, newCCO, newCCH, newCCL, newCCC, newC2Time, newC2H, newC2L, newC2O, newC2C, newC3H, newC3L, newC4H, newC4L, pExhHP, pExhHT, pExhLP, pExhLT, true, ccTime)
     else
         TFRawData.new(c1Time, c1H, c1L, c1O, c1C, ccTime, ccO, ccH, ccL, ccC, c2Time, c2H, c2L, c2O, c2C, c3H, c3L, c4H, c4L, exhHP, exhHT, exhLP, exhLT, false, ccTime)
 
 var array<TFRawData> tfRawArr = array.new<TFRawData>(6)
-array.set(tfRawArr, 0, applyPreviewShift(tf1Time, tf1H, tf1L, tf1O_C1, tf1C_C1, tf1CurrTime, tf1O, tf1H_curr, tf1L_curr, tf1C, tf1MagTime, tf1MagH, tf1MagL, tf1O_C2, tf1C_C2, tf1H_C3, tf1L_C3, tf1H_C4, tf1L_C4, tf1ExhHP, tf1ExhHT, tf1ExhLP, tf1ExhLT, rTF1, previewNextPeriod, straddleWindowOK))
-array.set(tfRawArr, 1, applyPreviewShift(tf2Time, tf2H, tf2L, tf2O_C1, tf2C_C1, tf2CurrTime, tf2O, tf2H_curr, tf2L_curr, tf2C, tf2MagTime, tf2MagH, tf2MagL, tf2O_C2, tf2C_C2, tf2H_C3, tf2L_C3, tf2H_C4, tf2L_C4, tf2ExhHP, tf2ExhHT, tf2ExhLP, tf2ExhLT, rTF2, previewNextPeriod, straddleWindowOK))
-array.set(tfRawArr, 2, applyPreviewShift(tf3Time, tf3H, tf3L, tf3O_C1, tf3C_C1, tf3CurrTime, tf3O, tf3H_curr, tf3L_curr, tf3C, tf3MagTime, tf3MagH, tf3MagL, tf3O_C2, tf3C_C2, tf3H_C3, tf3L_C3, tf3H_C4, tf3L_C4, tf3ExhHP, tf3ExhHT, tf3ExhLP, tf3ExhLT, rTF3, previewNextPeriod, straddleWindowOK))
-array.set(tfRawArr, 3, applyPreviewShift(tf4Time, tf4H, tf4L, tf4O_C1, tf4C_C1, tf4CurrTime, tf4O, tf4H_curr, tf4L_curr, tf4C, tf4MagTime, tf4MagH, tf4MagL, tf4O_C2, tf4C_C2, tf4H_C3, tf4L_C3, tf4H_C4, tf4L_C4, tf4ExhHP, tf4ExhHT, tf4ExhLP, tf4ExhLT, rTF4, previewNextPeriod, straddleWindowOK))
-array.set(tfRawArr, 4, applyPreviewShift(tf5Time, tf5H, tf5L, tf5O_C1, tf5C_C1, tf5CurrTime, tf5O, tf5H_curr, tf5L_curr, tf5C, tf5MagTime, tf5MagH, tf5MagL, tf5O_C2, tf5C_C2, tf5H_C3, tf5L_C3, tf5H_C4, tf5L_C4, tf5ExhHP, tf5ExhHT, tf5ExhLP, tf5ExhLT, rTF5, previewNextPeriod, straddleWindowOK))
-array.set(tfRawArr, 5, applyPreviewShift(tf6Time, tf6H, tf6L, tf6O_C1, tf6C_C1, tf6CurrTime, tf6O, tf6H_curr, tf6L_curr, tf6C, tf6MagTime, tf6MagH, tf6MagL, tf6O_C2, tf6C_C2, tf6H_C3, tf6L_C3, tf6H_C4, tf6L_C4, tf6ExhHP, tf6ExhHT, tf6ExhLP, tf6ExhLT, rTF6, previewNextPeriod, straddleWindowOK))
+array.set(tfRawArr, 0, applyPreviewShift(tf1Time, tf1H, tf1L, tf1O_C1, tf1C_C1, tf1CurrTime, tf1O, tf1H_curr, tf1L_curr, tf1C, tf1MagTime, tf1MagH, tf1MagL, tf1O_C2, tf1C_C2, tf1H_C3, tf1L_C3, tf1H_C4, tf1L_C4, tf1ExhHP, tf1ExhHT, tf1ExhLP, tf1ExhLT, tf1NxHP, tf1NxHT, tf1NxLP, tf1NxLT, rTF1, previewNextPeriod, straddleWindowOK))
+array.set(tfRawArr, 1, applyPreviewShift(tf2Time, tf2H, tf2L, tf2O_C1, tf2C_C1, tf2CurrTime, tf2O, tf2H_curr, tf2L_curr, tf2C, tf2MagTime, tf2MagH, tf2MagL, tf2O_C2, tf2C_C2, tf2H_C3, tf2L_C3, tf2H_C4, tf2L_C4, tf2ExhHP, tf2ExhHT, tf2ExhLP, tf2ExhLT, tf2NxHP, tf2NxHT, tf2NxLP, tf2NxLT, rTF2, previewNextPeriod, straddleWindowOK))
+array.set(tfRawArr, 2, applyPreviewShift(tf3Time, tf3H, tf3L, tf3O_C1, tf3C_C1, tf3CurrTime, tf3O, tf3H_curr, tf3L_curr, tf3C, tf3MagTime, tf3MagH, tf3MagL, tf3O_C2, tf3C_C2, tf3H_C3, tf3L_C3, tf3H_C4, tf3L_C4, tf3ExhHP, tf3ExhHT, tf3ExhLP, tf3ExhLT, tf3NxHP, tf3NxHT, tf3NxLP, tf3NxLT, rTF3, previewNextPeriod, straddleWindowOK))
+array.set(tfRawArr, 3, applyPreviewShift(tf4Time, tf4H, tf4L, tf4O_C1, tf4C_C1, tf4CurrTime, tf4O, tf4H_curr, tf4L_curr, tf4C, tf4MagTime, tf4MagH, tf4MagL, tf4O_C2, tf4C_C2, tf4H_C3, tf4L_C3, tf4H_C4, tf4L_C4, tf4ExhHP, tf4ExhHT, tf4ExhLP, tf4ExhLT, tf4NxHP, tf4NxHT, tf4NxLP, tf4NxLT, rTF4, previewNextPeriod, straddleWindowOK))
+array.set(tfRawArr, 4, applyPreviewShift(tf5Time, tf5H, tf5L, tf5O_C1, tf5C_C1, tf5CurrTime, tf5O, tf5H_curr, tf5L_curr, tf5C, tf5MagTime, tf5MagH, tf5MagL, tf5O_C2, tf5C_C2, tf5H_C3, tf5L_C3, tf5H_C4, tf5L_C4, tf5ExhHP, tf5ExhHT, tf5ExhLP, tf5ExhLT, tf5NxHP, tf5NxHT, tf5NxLP, tf5NxLT, rTF5, previewNextPeriod, straddleWindowOK))
+array.set(tfRawArr, 5, applyPreviewShift(tf6Time, tf6H, tf6L, tf6O_C1, tf6C_C1, tf6CurrTime, tf6O, tf6H_curr, tf6L_curr, tf6C, tf6MagTime, tf6MagH, tf6MagL, tf6O_C2, tf6C_C2, tf6H_C3, tf6L_C3, tf6H_C4, tf6L_C4, tf6ExhHP, tf6ExhHT, tf6ExhLP, tf6ExhLT, tf6NxHP, tf6NxHT, tf6NxLP, tf6NxLT, rTF6, previewNextPeriod, straddleWindowOK))
 
 // FIX HTF-STRADDLE-1 (T3, probe-validated 2026-07-02): for a straddle-shifted slot, rebuild the TRUE
 // forming HTF candle from the chart bar's daily sub-bars plus the live close, replacing the synthetic
@@ -1211,7 +1255,7 @@ detectBarTypeAndFailed(prevH, prevL, currH, currL, currO, currC) =>
         barType = s == "1" ? (aboveOpen ? "1u" : "1d") : s == "3" ? (aboveOpen ? "3u" : "3d") : (isFailed ? "F" : "") + s
         [barType, isFailed]
 
-computeSignalState(data, tf, raw, showOpen, populateDebug, debugTfStr) =>
+computeSignalState(data, tf, raw, showOpen, populateDebug, debugTfStr, syntheticCC) =>
     tfTime = raw.c1Time
     tfH = raw.c1H
     tfL = raw.c1L
@@ -1280,14 +1324,24 @@ computeSignalState(data, tf, raw, showOpen, populateDebug, debugTfStr) =>
     bool retPreF2u = false, bool retPreF2d = false, float retF2OpenPrice = na
     string retHighStyle = "Dashed", string retLowStyle = "Dashed"
     if validTimeframe and not na(data.prevHigh)
-        if not na(data.prevMagHigh) and not data.magHighCrossed and tfH_curr >= data.prevMagHigh
-            data.magHighCrossed := true
-        if not na(data.prevMagLow) and not data.magLowCrossed and tfL_curr <= data.prevMagLow
-            data.magLowCrossed := true
-        if not na(data.exhHighPrice) and not data.exhHighCrossed and tfH_curr >= data.exhHighPrice
-            data.exhHighCrossed := true
-        if not na(data.exhLowPrice) and not data.exhLowCrossed and tfL_curr <= data.exhLowPrice
-            data.exhLowCrossed := true
+        // FIX PREVIEW-CROSSED-1 (2026-09-13): a synthetic preview CC cannot cross anything. The
+        // placeholder applyPreviewShift builds copies the promoted C1's range exactly (newCCH = ccH,
+        // newCCL = ccL), so tfH_curr/tfL_curr ARE last period's extremes and these >= / <= tests
+        // flagged every magnitude and exhaustion level inside that range as already crossed, on a
+        // period that has not traded a tick. The flags are not only colour: they feed
+        // exhDisablesInForce, break-even stops, TAW removal and exhDisablesFTFC. Reconstructed
+        // straddle slots keep the tests, their CC being real daily-derived data (HTF-STRADDLE-1 T3);
+        // that is exactly the distinction syntheticCC carries. isPreview itself is untouched, so the
+        // realtime-rollback re-latch and the alert/Lead conservatism are unchanged.
+        if not syntheticCC
+            if not na(data.prevMagHigh) and not data.magHighCrossed and tfH_curr >= data.prevMagHigh
+                data.magHighCrossed := true
+            if not na(data.prevMagLow) and not data.magLowCrossed and tfL_curr <= data.prevMagLow
+                data.magLowCrossed := true
+            if not na(data.exhHighPrice) and not data.exhHighCrossed and tfH_curr >= data.exhHighPrice
+                data.exhHighCrossed := true
+            if not na(data.exhLowPrice) and not data.exhLowCrossed and tfL_curr <= data.exhLowPrice
+                data.exhLowCrossed := true
         // FIX P1-a: run the detection + sticky-stop latch on every bar when stops are enabled,
         // not only on barstate.islast. The stop "locks for the period" semantic requires the
         // latch to have fired on the bars where the signal went in force; with the old islast
@@ -1501,8 +1555,11 @@ computeSignalState(data, tf, raw, showOpen, populateDebug, debugTfStr) =>
             force_mag_low = showMagnitude and (drawLow or inside_3d_setup or threeExp_show_mag_low) and not p3_suppress_mag_low and not cont_suppress_mag_low
             mag_high_passes_ftfc = true
             mag_low_passes_ftfc = true
-            price_hit_mag_high = tfH_curr >= data.prevMagHigh
-            price_hit_mag_low = tfL_curr <= data.prevMagLow
+            // FIX PREVIEW-CROSSED-1: second synthetic-hit path. These feed exhRequiresMagHit
+            // independently of the magHighCrossed/magLowCrossed latches, so guarding only the
+            // latches would still let a placeholder CC "hit" magnitude and unlock exhaustion.
+            price_hit_mag_high = not syntheticCC and tfH_curr >= data.prevMagHigh
+            price_hit_mag_low = not syntheticCC and tfL_curr <= data.prevMagLow
             exh_high_mag_filter = not exhRequiresMagHit or price_hit_mag_high
             exh_low_mag_filter = not exhRequiresMagHit or price_hit_mag_low
 
@@ -2211,7 +2268,9 @@ for i = 5 to 0
         // the market-wide Auto mechanism is armed, not that THIS slot's open is a proxy; it was hiding
         // the W and M open lines on unshifted slots every pre-market. HTF-STRADDLE-1's per-slot guard
         // (raw.isPreview: no open line for a straddled/previewed slot, its open is synthetic) stays.
-        result = computeSignalState(data, cfg.tf, raw, cfg.showOpen and not raw.isPreview, isDebugTF, cfg.tf)
+        // FIX PREVIEW-CROSSED-1: reconOKArr is filled above, so the loop can tell a synthetic
+        // placeholder CC from a reconstructed one; only the synthetic one suppresses hit-testing.
+        result = computeSignalState(data, cfg.tf, raw, cfg.showOpen and not raw.isPreview, isDebugTF, cfg.tf, raw.isPreview and not array.get(reconOKArr, i))
         array.set(tfResults, i, result)
 
 var int anchorIndex = -1

@@ -8,11 +8,15 @@ How to read this file:
 - **Every fix cites its `FIX` tag.** Grep the current source for the tag to find the exact code and the full inline rationale. Code references are function names and tags, never line numbers.
 - **Dates** come from dated `FIX` comments and file names. Where a snapshot carries no date of its own (2.2.2), the newest dated comment introduced in it is used.
 
-## [3.1.1] — 2026-09-10
+## [3.1.1] — 2026-09-13
 
 Requires TheStratGrammar (TV version 1). Source: `pine/TheStratSuite_v3.1.1.pine`. Seven fixes to the preview path, found after a Friday pre-market report on SPY and a follow-up scan; details in each entry.
 
 ### Fixed
+
+- **Weekly and monthly exhaustion targets are rebased when the period rolls over.** On a weekend or a holiday the projection promoted the finished period into C1 but kept the exhaustion snapshot that was computed before that period traded. On AMD's weekly chart the completed week of Sep 7 to 11 ran straight through the pivot from the week of Aug 17, yet that broken pivot was still drawn as the weekly exhaustion target, sitting below the weekly trigger high and painted in the already-crossed color. The scan now produces two results per timeframe: the current period's, unchanged, and one rebased onto the period that just finished. A projection takes the rebased one, and only where the period it promoted has genuinely closed, so nothing that could still move ever feeds a target. (`EXH-PREVIEW-CHANNEL-1`)
+
+- **A projected period no longer reports its targets as already hit.** The placeholder candle a preview builds copies the promoted period's high and low exactly, so every magnitude and exhaustion level inside that range was flagged as crossed before the projected period had traded a tick. That drove more than the color. It also fed the exhaustion in-force override, break-even stops, Take Action Window removal, and the magnitude-hit gate that unlocks exhaustion targets. A placeholder candle now hits nothing. Reconstructed slots, whose candle is rebuilt from real daily bars, still hit normally. (`PREVIEW-CROSSED-1`)
 
 - **The weekly slot no longer shows a yellow `?` during Friday pre-market.** With Preview Mode on Auto, opening a chart on Friday before the bell (SPY 1W, Sep 4 2026 07:51 ET) painted W yellow in the header, demoted the forming week into C1, and reported the week as unknown, even though Monday through Thursday had traded and Friday's session was still to come. `shouldApplyPreview` treated every Friday as part of the weekend by calendar (`differentWeek or Fri/Sat/Sun`), so the moment Auto preview armed for the closed pre-market it projected next week. The weekly test now asks the same question `shouldStraddle` does: has the served week's *scheduled close* (`time_close(tf)`) passed? Friday after the close, the weekend, and Monday before the open all sit past it, so the weekend projection is unchanged; Friday pre-market is not, so the week renders as the in-progress candle it is. Session-aware for free (16:00 ET equities, 17:00 ET futures) and immune to holiday-glued bars whose close is still ahead. Non-weekly slots are untouched. (`PREVIEW-WEEKCLOSE-1`)
 
